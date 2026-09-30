@@ -17,24 +17,76 @@ const ANIZIP_URL = "https://api.ani.zip/mappings";
 const ARM_URL = "https://arm.haglund.dev/api/v2/ids";
 const VIDNEST_BASE = "https://vidnest.fun";
 
-// Simple in-memory cache (session-scoped). Mirrors the backend's cache
-// semantics closely enough for a static site: catalog entries are stable
-// within a session, so a 5-minute TTL is plenty.
+// Two-tier cache (session + persistent).
+//
+// The in-memory Map covers the live session; the localStorage tier survives
+// reloads and app restarts. That persistence is what fixes the "reopened the
+// app and it came back faded/half-loaded" loop: a page whose AniList calls
+// all fail (rate limit, upstream outage) used to render its structure with
+// nothing in it and keep the user stuck until the API recovered. With a
+// persistent tier the *previous* good payload is served instantly on reload
+// while fresh data is fetched underneath, so the app always has something
+// real to show.
 const _cache = new Map();
 const _CACHE_TTL = 5 * 60 * 1000;
+// Persistent entries live far longer: catalog/season data is effectively
+// static, and a stale-but-real payload beats a hard failure every time.
+const _PERSIST_TTL = 24 * 60 * 60 * 1000;
+const _PERSIST_PREFIX = "ka_api_";
+// Cap the persistent tier so one long session can never fill the ~5MB
+// localStorage quota: the newest entries matter, so prune from the front.
+const _PERSIST_MAX_ENTRIES = 300;
 
 function _cacheGet(key) {
   const entry = _cache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.at > _CACHE_TTL) {
-    _cache.delete(key);
+  if (entry) {
+    if (Date.now() - entry.at > _CACHE_TTL) _cache.delete(key);
+    else return entry.value;
+  }
+  // Memory miss: try the persistent tier.
+  try {
+    const raw = localStorage.getItem(_PERSIST_PREFIX + key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.at !== "number" || parsed.v === undefined) return null;
+    if (Date.now() - parsed.at > _PERSIST_TTL) {
+      localStorage.removeItem(_PERSIST_PREFIX + key);
+      return null;
+    }
+    _cache.set(key, parsed);
+    return parsed.v;
+  } catch (e) {
+    // Corrupt entry, quota error, or storage disabled: drop it quietly.
+    try { localStorage.removeItem(_PERSIST_PREFIX + key); } catch (e2) { /* ignore */ }
     return null;
   }
-  return entry.value;
 }
 
 function _cacheSet(key, value) {
-  _cache.set(key, { value, at: Date.now() });
+  const entry = { value, at: Date.now() };
+  _cache.set(key, entry);
+  try {
+    localStorage.setItem(_PERSIST_PREFIX + key, JSON.stringify(entry));
+    // Enforce the cap: drop the oldest entries first.
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(_PERSIST_PREFIX)) keys.push(k);
+    }
+    if (keys.length > _PERSIST_MAX_ENTRIES) {
+      const withTime = keys.map(k => {
+        try {
+          const p = JSON.parse(localStorage.getItem(k));
+          return { k, at: (p && p.at) || 0 };
+        } catch (e) { return { k, at: 0 }; }
+      }).sort((a, b) => a.at - b.at);
+      const excess = withTime.length - _PERSIST_MAX_ENTRIES;
+      for (let i = 0; i < excess; i++) localStorage.removeItem(withTime[i].k);
+    }
+  } catch (e) {
+    // Quota exceeded or storage disabled: the in-memory cache still works.
+    try { localStorage.clear(); } catch (e2) { /* ignore */ }
+  }
 }
 
 // --- GraphQL ------------------------------------------------------------
@@ -48,6 +100,14 @@ let _anilistQueue = Promise.resolve();
  * that under burst). The backend used asyncio + retries; the browser
  * equivalent is a promise queue (so a homepage of parallel rails cannot fire
  * 8 requests in one tick) plus exponential backoff on 429/5xx.
+ *
+ * The backoff is deliberately SHORT: 500ms/1s/2s rather than the old
+ * 0.6s/1.2s/2.4s/4.8s. AniList's rate-limit window is per-minute, so a retry
+ * that lands seconds later usually succeeds; the old ladder could hold a
+ * page hostage for ~9s of silent waiting and still give up right as the
+ * window rolled over — the "everything stops working, then fixes itself a
+ * minute later" signature. A jitter term desynchronizes parallel retries so
+ * they do not all slam the API on the same tick.
  */
 async function _anilist(query, variables = {}, attempt = 0) {
   const run = async () => {
@@ -57,8 +117,9 @@ async function _anilist(query, variables = {}, attempt = 0) {
       body: JSON.stringify({ query, variables }),
     });
     if (resp.status === 429 || resp.status >= 500) {
-      if (attempt >= 3) throw new Error(`AniList rate limit exceeded (HTTP ${resp.status})`);
-      const delay = Math.min(8000, 600 * Math.pow(2, attempt));
+      if (attempt >= 2) throw new Error(`AniList rate limit exceeded (HTTP ${resp.status})`);
+      const jitter = Math.random() * 250;
+      const delay = Math.min(2000, 500 * Math.pow(2, attempt)) + jitter;
       await new Promise(r => setTimeout(r, delay));
       return _anilist(query, variables, attempt + 1);
     }
@@ -740,10 +801,15 @@ const API = {
     const cached = _cacheGet(cacheKey);
     if (cached) return cached;
 
-    // Characters and recommendations are supplementary: a failure degrades
-    // the page instead of failing it (same contract as the backend).
+    // Characters and recommendations are supplementary: a failure must
+    // degrade the page, not fail it. But the media call itself previously
+    // swallowed its own error with `.catch(() => null)`, so a rate-limited
+    // fetch resolved as "Anime not found" — a wrong message and a dead page
+    // for what is usually a transient hiccup. Let the real error through so
+    // the caller's Retry button makes sense ("temporary network failure" was
+    // the message the user actually saw here).
     const [mediaData, characters, recommendations] = await Promise.all([
-      _anilist(Q_MEDIA, { id, page: 1, perPage: 1 }).catch(() => null),
+      _anilist(Q_MEDIA, { id, page: 1, perPage: 1 }),
       this._charactersRaw(id).catch(() => []),
       this._recommendationsRaw(id).catch(() => []),
     ]);
