@@ -22,7 +22,10 @@ const KILL_SWITCH = {
   // 2: api.js season navigation fix (franchise-root anchoring) — the v1
   // bundle anchored at whatever page was open, so Season 2+ pages mislabelled
   // every chip and navigating seasons landed on the wrong entry.
-  SITE_VERSION: 2,
+  // 3: homepage resilience — rails now cached persistently with stale-
+  // fallback, AniList fetch timeout (a hung request could stall the shared
+  // queue indefinitely), and honest Retry panel instead of a frozen skeleton.
+  SITE_VERSION: 3,
   _verdict: null, // null = allowed; string = block message
   _checked: false,
 

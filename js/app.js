@@ -345,6 +345,35 @@ class App {
     } catch (err) {
       console.error("Hero error:", err);
       if (heroContainer) heroContainer.innerHTML = "";
+      // The old behaviour swallowed this error and left the skeleton rail
+      // frozen on screen forever (the exact "app loads the structure but
+      // nothing else until I reopen it" report). When ALL rails failed —
+      // meaning there is no cached data at all — show an honest error with
+      // a Retry button instead of a dead skeleton.
+      const anyRailLoaded = await Promise.race([
+        Promise.allSettled([
+          API.popular(1, ROW_SIZE),
+          API.recent(1, ROW_SIZE),
+          API.trending(2, ROW_SIZE),
+        ]).then(settled => settled.some(s => s.status === "fulfilled")),
+        new Promise(resolve => setTimeout(() => resolve(false), 15000)),
+      ]);
+      if (!anyRailLoaded) {
+        skeletonTrack.remove();
+        content.appendChild(Components.errorPanel(
+          "Couldn't load the homepage. Check your connection and try again.",
+          () => this.renderHome()
+        ));
+        return;
+      }
+      // Some rails made it through — the trending skeleton would otherwise
+      // sit frozen forever, so replace it with an honest failed-rail note.
+      if (skeletonTrack.isConnected) {
+        const failed = Components.section("Trending This Week", [], {
+          subtitle: "Couldn't load this rail — pull down to retry later",
+        });
+        skeletonTrack.replaceWith(failed);
+      }
     }
 
     // Remaining rails load in parallel.
@@ -429,7 +458,22 @@ class App {
 
     const loadMore = async () => {
       if (!hasMore) return;
-      const data = await API[apiMethod](page, perPage);
+      let data;
+      try {
+        data = await API[apiMethod](page, perPage);
+      } catch (err) {
+        // A page-1 failure used to fall through to "Nothing to show here
+        // yet" — a wrong message for what is a network hiccup. Show an
+        // honest retry panel instead.
+        if (content.children.length === 0) {
+          content.appendChild(Components.errorPanel(
+            `Couldn't load ${title}. Check your connection and try again.`,
+            () => this.renderListPage(apiMethod, title)
+          ));
+        }
+        hasMore = false;
+        return;
+      }
       const results = (data.results || []).filter(m => m && !m.isAdult);
       if (results.length > 0) {
         // Page 1 is a rail; later pages append below it so the initial screen

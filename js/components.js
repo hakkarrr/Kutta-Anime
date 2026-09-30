@@ -458,6 +458,31 @@ const Components = {
     return wrap;
   },
 
+  /**
+   * Full-width error panel with a Retry button for page-level failures.
+   *
+   * Used where the old code silently left skeleton rails frozen on screen
+   * when every network path failed. `onRetry` re-runs the page renderer.
+   */
+  errorPanel(message, onRetry) {
+    const wrap = Utils.el("div", { className: "no-results error-panel" });
+    wrap.appendChild(Utils.el("div", {
+      className: "no-results-icon",
+      textContent: "⚠️",
+    }));
+    wrap.appendChild(Utils.el("p", { textContent: message }));
+    if (typeof onRetry === "function") {
+      const btn = Utils.el("button", {
+        type: "button",
+        className: "btn btn-primary",
+        textContent: "Retry",
+        onclick: () => { btn.disabled = true; btn.textContent = "Retrying…"; onRetry(); },
+      });
+      wrap.appendChild(btn);
+    }
+    return wrap;
+  },
+
   /** Subtitle track <option>. */
   subtitleOption(label, value, isDefault) {
     return Utils.el("option", {

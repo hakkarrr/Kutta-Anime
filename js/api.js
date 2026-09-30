@@ -111,11 +111,32 @@ let _anilistQueue = Promise.resolve();
  */
 async function _anilist(query, variables = {}, attempt = 0) {
   const run = async () => {
-    const resp = await fetch(ANILIST_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ query, variables }),
-    });
+    // A fetch without a timeout can hang for the OS-level TCP window
+    // (tens of seconds on flaky mobile networks). Because every AniList
+    // call shares one promise queue, a single hung request would stall
+    // EVERY page — the "app loads nothing until I kill and reopen it"
+    // signature. Abort after 12s and treat it as a retryable failure.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    let resp;
+    try {
+      resp = await fetch(ANILIST_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ query, variables }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      // AbortError here = our own timeout; anything else is a network error.
+      // Both are transient, so fall through to the same retry ladder.
+      if (attempt >= 2) throw new Error("AniList unreachable (network timeout)");
+      const jitter = Math.random() * 250;
+      const delay = Math.min(2000, 500 * Math.pow(2, attempt)) + jitter;
+      await new Promise(r => setTimeout(r, delay));
+      return _anilist(query, variables, attempt + 1);
+    }
+    clearTimeout(timer);
     if (resp.status === 429 || resp.status >= 500) {
       if (attempt >= 2) throw new Error(`AniList rate limit exceeded (HTTP ${resp.status})`);
       const jitter = Math.random() * 250;
@@ -673,6 +694,57 @@ function vidnestStreams(anilistId, ep, audio = "sub") {
 
 // --- The API object (drop-in replacement for the backend client) ----------
 
+/**
+ * Cached loader for the homepage rails (trending / popular / recent).
+ *
+ * These three calls build the ENTIRE homepage, yet they were the only
+ * AniList paths with no cache at all — every app reopen re-fetched them
+ * over the network, so one rate-limit window or dead Wi-Fi moment rendered
+ * the exact screenshot the user reported: the skeleton "Trending This
+ * Week" rail with nothing in it, forever.
+ *
+ * Behaviour:
+ *  - Fresh cache (memory or localStorage) is served instantly.
+ *  - A network fetch refreshes the cache in the background.
+ *  - On failure, the last cached copy of ANY age is served (stale beats
+ *    dead — the payload is a popularity list, not financial data).
+ *  - Only when there has never been a successful fetch does the error
+ *    propagate, so the UI can show an honest Retry panel.
+ */
+async function _railRequest(kind, query, page, perPage) {
+  const cacheKey = `rail:${kind}:${page}:${perPage}`;
+  const cached = _cacheGet(cacheKey);
+  const refresh = async () => {
+    const data = await _anilist(query, { page, perPage });
+    const results = ((data.Page || {}).media || []).map(m => _formatMedia(m));
+    _cacheSet(cacheKey, results);
+    return { results };
+  };
+
+  if (cached) {
+    // Serve the cache now; refresh silently so the next open is current.
+    refresh().catch(() => {});
+    return { results: cached };
+  }
+  try {
+    return await refresh();
+  } catch (err) {
+    // Nothing fresh and nothing cached under the live key: accept ANY
+    // prior copy of this rail before giving up.
+    const staleKey = `rail:${kind}:${page}:`;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(_PERSIST_PREFIX + staleKey)) {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(k));
+          if (parsed && parsed.v) return { results: parsed.v };
+        } catch (e) { /* skip corrupt */ }
+      }
+    }
+    throw err;
+  }
+}
+
 const API = {
   // The static site has no backend base URL; endpoints are reimplemented
   // below. Kept as an empty string so any legacy relative call is a no-op
@@ -733,18 +805,15 @@ const API = {
   },
 
   async trending(page = 1, perPage = 20) {
-    const data = await _anilist(Q_TRENDING, { page, perPage });
-    return { results: (data.Page.media || []).map(m => _formatMedia(m)) };
+    return _railRequest("trending", Q_TRENDING, page, perPage);
   },
 
   async popular(page = 1, perPage = 20) {
-    const data = await _anilist(Q_POPULAR, { page, perPage });
-    return { results: (data.Page.media || []).map(m => _formatMedia(m)) };
+    return _railRequest("popular", Q_POPULAR, page, perPage);
   },
 
   async recent(page = 1, perPage = 20) {
-    const data = await _anilist(Q_RECENT, { page, perPage });
-    return { results: (data.Page.media || []).map(m => _formatMedia(m)) };
+    return _railRequest("recent", Q_RECENT, page, perPage);
   },
 
   async schedule(page = 1, perPage = 20) {
