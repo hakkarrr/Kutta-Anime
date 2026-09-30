@@ -353,17 +353,69 @@ function _seasonSortKey(season) {
   return [year ? 0 : 1, year || 0, season.anilistId || 0];
 }
 
+/**
+ * A season list is only trustworthy if it is anchored at the FRANCHISE ROOT
+ * — the entry whose title every other entry derives from. The page the user
+ * is on is almost never that root: "Shingeki no Kyojin Season 3 Part 2" is a
+ * mid-chain entry whose title carries no franchise name, so walking SEQUEL
+ * edges from *it* collects only the entries after it, and renumbering that
+ * fragment from "Season 1" is what made every season page claim to be
+ * Season 1 and every chip navigate to the wrong entry.
+ *
+ * The root is recovered by walking PREQUEL edges upward until the chain
+ * ends. Titles alone cannot pick the root ("The Final Season" does not
+ * contain "Shingeki no Kyojin"), but AniList's relation graph can.
+ */
+const _seasonNodeCache = new Map();
+
+async function _findFranchiseRoot(anilistId) {
+  let currentId = anilistId;
+  const guard = new Set([currentId]);
+  for (let hops = 0; hops < 10; hops++) {
+    let node = _seasonNodeCache.get(currentId) || null;
+    if (!node) {
+      try {
+        const data = await _anilist(Q_SEASON_RELATIONS, { id: currentId });
+        node = data.Media || null;
+      } catch (e) {
+        node = null;
+      }
+      if (node) _seasonNodeCache.set(currentId, node);
+    }
+    if (!node) return currentId;
+    // The shallowest PREQUEL edge that stays within the franchise shape.
+    const prequel = ((node.relations || {}).edges || []).find(edge => {
+      const candidate = edge.node || {};
+      return edge.relationType === "PREQUEL"
+        && candidate.id
+        && !guard.has(candidate.id)
+        && ["TV", "TV_SHORT", "ONA", "SPECIAL"].includes(candidate.format)
+        && (!candidate.type || candidate.type === "ANIME");
+    });
+    const prequelId = prequel && prequel.node && prequel.node.id;
+    if (!prequelId) return currentId;
+    guard.add(prequelId);
+    currentId = prequelId;
+  }
+  // Ten hops without an end is a data pathology, not a franchise; stop on
+  // the last verified node rather than looping.
+  return currentId;
+}
+
 async function _seasonBundle(anilistId) {
   const cacheKey = `seasons:${anilistId}`;
   const cached = _cacheGet(cacheKey);
   if (cached) return cached;
 
-  let root = null;
-  try {
-    const data = await _anilist(Q_SEASON_RELATIONS, { id: anilistId });
-    root = data.Media || null;
-  } catch (e) {
-    root = null;
+  const rootId = await _findFranchiseRoot(anilistId);
+  let root = _seasonNodeCache.get(rootId) || null;
+  if (!root) {
+    try {
+      const data = await _anilist(Q_SEASON_RELATIONS, { id: rootId });
+      root = data.Media || null;
+    } catch (e) {
+      root = null;
+    }
   }
   if (!root) {
     const result = {
@@ -382,12 +434,13 @@ async function _seasonBundle(anilistId) {
   const rootNorm = _normalizeTitle(rootTitle);
   const rootWords = _titleWords(rootNorm);
 
-  const seen = new Set([anilistId]);
-  const seasons = [_seasonEntry(root, true)];
+  const seen = new Set([rootId]);
+  const seasons = [_seasonEntry(root, rootId === anilistId)];
 
-  // BFS over SEQUEL relations, two-plus levels deep, mirroring the backend.
-  let frontier = [anilistId];
-  const visited = new Map([[anilistId, root]]);
+  // BFS over SEQUEL relations from the franchise root, up to four levels
+  // deep (S1 -> S2 -> S3 -> S3P2 -> Final covers every AoT season).
+  let frontier = [rootId];
+  const visited = new Map([[rootId, root]]);
 
   for (let depth = 0; depth < 4; depth++) {
     const nextFrontier = [];
@@ -410,7 +463,7 @@ async function _seasonBundle(anilistId) {
         const title = (candidate.title || {}).romaji || (candidate.title || {}).english || "";
         if (!_sharesFranchise(rootNorm, rootWords, _normalizeTitle(title))) continue;
         seen.add(candidate.id);
-        seasons.push(_seasonEntry(candidate, false));
+        seasons.push(_seasonEntry(candidate, candidate.id === anilistId));
         nextFrontier.push(candidate.id);
       }
     }
@@ -418,11 +471,35 @@ async function _seasonBundle(anilistId) {
     if (!frontier.length) break;
   }
 
+  // A franchise walked from its root can still miss an entry whose SEQUEL
+  // edge is absent or malformed on AniList. Each visited node is asked for
+  // its own PREQUEL-chain head as a cross-check; any id that reports a
+  // different root than the one we walked from is appended so the strip
+  // never silently splits a franchise in two.
+  const crossCheckIds = [...visited.keys()].filter(id => id !== rootId);
+  await Promise.all(crossCheckIds.map(async id => {
+    try {
+      const headId = await _findFranchiseRoot(id);
+      if (headId !== rootId && !seen.has(headId)) {
+        const d = await _anilist(Q_SEASON_RELATIONS, { id: headId });
+        if (d.Media) {
+          const title = (d.Media.title || {}).romaji || (d.Media.title || {}).english || "";
+          if (_sharesFranchise(rootNorm, rootWords, _normalizeTitle(title))) {
+            seen.add(headId);
+            seasons.push(_seasonEntry(d.Media, headId === anilistId));
+          }
+        }
+      }
+    } catch (e) { /* cross-check is best-effort */ }
+  }));
+
   // Refresh stale entries (sequels reached via shallow edges may lack
   // year/cover) so season chips show real metadata.
   const stale = seasons.filter(s =>
     s.anilistId !== anilistId && !(s.seasonYear && s.thumbnail));
   await Promise.all(stale.map(async season => {
+    const node = _seasonNodeCache.get(season.anilistId);
+    if (node) { Object.assign(season, _seasonEntry(node, false)); return; }
     try {
       const d = await _anilist(Q_SEASON_RELATIONS, { id: season.anilistId });
       if (d.Media) Object.assign(season, _seasonEntry(d.Media, false));

@@ -19,7 +19,10 @@ const KILL_SWITCH = {
   CONFIG_URL:
     "https://raw.githubusercontent.com/hakkarrr/version-control-anime-app/main/app-config.json",
   // Bump this whenever the Pages site changes in a way users must receive.
-  SITE_VERSION: 1,
+  // 2: api.js season navigation fix (franchise-root anchoring) — the v1
+  // bundle anchored at whatever page was open, so Season 2+ pages mislabelled
+  // every chip and navigating seasons landed on the wrong entry.
+  SITE_VERSION: 2,
   _verdict: null, // null = allowed; string = block message
   _checked: false,
 
