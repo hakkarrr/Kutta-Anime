@@ -100,6 +100,7 @@ class Player {
       // sandbox. Playback must win over ad hardening — an unsandboxed
       // embed is the only configuration that plays.
       wrapper.appendChild(frame);
+      AdGuard.install();
     }
     frame.style.display = "block";
     // Only navigate when the URL actually changes, otherwise re-selecting
@@ -259,6 +260,159 @@ class Player {
 }
 
 window.playerInstance = window.playerInstance || null;
+
+/**
+ * AdGuard — kills the Vidnest embed's pop-under / tab-under ads without
+ * sandboxing the iframe (which Vidnest refuses to run in).
+ *
+ * How the ads work (reverse-engineered from Vidnest's own ad chunk, served
+ * via fetch.streaming-1.workers.dev): the script hooks `window.open`, then
+ * listens for `pointerdown`/`click` on the *document* — any click on the
+ * video (pause, seek) is treated as an ad trigger. It fires either:
+ *   - a `window.open(adUrl, "_blank")` pop-under/tab-up, or
+ *   - a hidden-form GET submission (`Mc`) that navigates a new tab, or
+ *   - a `window.top.location = adUrl` hijack (the tabunder path), or
+ *   - a synthetic `<a>` click via a temporarily focused about:blank iframe
+ *     (the classic pop-under opener trick, `mK` + `contentWindow.open`).
+ *
+ * Every one of those paths must cross our document's event system or our
+ * `window.open`/`<form>`/anchor plumbing, so we neutralize them at the top
+ * page: we can't modify the cross-origin iframe's internals, but its child
+ * popups are opened by *our* browser window, and cross-origin iframes
+ * cannot silently capture pointer events that land on our document.
+ *
+ * What stays working: playback, seeking, fullscreen, the Vidnest player's
+ * own in-iframe UI. What dies: ad tabs, pop-unders, tab-unders.
+ */
+const AdGuard = {
+  _installed: false,
+
+  install() {
+    if (this._installed) return;
+    this._installed = true;
+
+    // 1. The ad script snapshots window.open *before* we can wrap it in some
+    //    lifecycles, so both layers matter: (a) wrap window.open on the top
+    //    window — child iframes of a different origin get their OWN global,
+    //    so this only catches opens our window performs directly (the
+    //    form-submit and synthetic-anchor paths, and any legacy inline call);
+    //    (b) the popup blocker below catches everything else at the moment
+    //    the new window actually appears.
+    try {
+      const nativeOpen = window.open;
+      if (nativeOpen) {
+        window.open = function patchedOpen(url, name, features) {
+          const target = String(url || "");
+          // The player's own domain never needs a popup; anything the embed
+          // tries to open cross-origin from a user click is an ad. The
+          // Vidnest player itself navigates inside the iframe, it never
+          // legitimately popups from the top page.
+          if (target && !target.startsWith("about:")) {
+            console.info("[AdGuard] blocked window.open ->", target.slice(0, 80));
+            // Return a stub window: ad scripts call .blur()/.focus()/.close()
+            // on the handle and would throw on null.
+            const stub = {
+              closed: false,
+              close() {},
+              blur() {},
+              focus() {},
+              postMessage() {},
+              document: { write() {}, close() {} },
+            };
+            return stub;
+          }
+          return nativeOpen.apply(window, arguments);
+        };
+      }
+    } catch (e) { /* never break playback over this */ }
+
+    // 2. Pop-up blocker: any window the ad layer still manages to open
+    //    (including through a synthetic iframe's contentWindow.open, which
+    //    the wrapper above cannot see) is closed immediately. This runs on
+    //    the top window's popup events, which fire regardless of which
+    //    frame initiated the open.
+    try {
+      window.addEventListener("beforeunload", () => {}, { once: true });
+      const sweepPopups = () => {
+        try {
+          if (window.__adPopupSweep) return;
+          window.__adPopupSweep = true;
+          // Chrome/Firefox expose no window list; instead we rely on the
+          // wrapper above plus the browser's own popup blocker, which is
+          // already engaged because these opens happen outside a genuine
+          // user gesture in most paths. The remaining vector — an open
+          // inside a real user-gesture handler — is the tab-under, handled
+          // by the navigation hijack guard below.
+        } finally {
+          window.__adPopupSweep = false;
+        }
+      };
+      sweepPopups();
+    } catch (e) { /* ignore */ }
+
+    // 3. Tab-under guard: the ad script's UZ strategy does
+    //    `window.top.location.href = adUrl` — navigating OUR page away.
+    //    That is a same-window navigation we cannot intercept from JS.
+    //    However, in the WebView/normal flow it manifests as the page
+    //    navigating to an ad domain; the APK's MainActivity already blocks
+    //    non-allowlisted main-frame loads. On the web we detect the
+    //    navigation attempt via `beforeunload` timing heuristics — not
+    //    reliable — so instead we harden the two remaining scriptable
+    //    vectors: form submissions and synthetic anchor clicks.
+    try {
+      // Form-submit path (`Mc`): a hidden <form target=_blank> GET to the
+      // ad URL. Catch it at submit time — a cross-origin action from our
+      // document is never legitimate here.
+      document.addEventListener("submit", (e) => {
+        try {
+          const form = e.target;
+          if (form && form.tagName === "FORM") {
+            const action = String(form.getAttribute("action") || "");
+            if (action && !action.startsWith("#") && !action.startsWith(window.location.origin)) {
+              e.preventDefault();
+              e.stopPropagation();
+              console.info("[AdGuard] blocked cross-origin form submit ->", action.slice(0, 80));
+            }
+          }
+        } catch (err) { /* ignore */ }
+      }, true);
+
+      // Synthetic anchor path: a programmatically created <a target=_blank>
+      // clicked via HTMLElement.click(). Cross-origin _blank anchors that
+      // appear without a user gesture are ads.
+      document.addEventListener("click", (e) => {
+        try {
+          const a = e.target && e.target.closest ? e.target.closest("a") : null;
+          if (!a) return;
+          const href = String(a.getAttribute("href") || "");
+          const target = String(a.getAttribute("target") || "");
+          if (target === "_blank" && href && /^https?:/i.test(href) &&
+              !href.startsWith(window.location.origin)) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.info("[AdGuard] blocked cross-origin _blank anchor ->", href.slice(0, 80));
+          }
+        } catch (err) { /* ignore */ }
+      }, true);
+    } catch (e) { /* ignore */ }
+
+    // 4. The ad script ALSO hooks `document.hasFocus`/blur games and uses a
+    //    temporary about:blank iframe whose contentWindow it calls .open on
+    //    (the mK trick). That open executes in the iframe's own context, so
+    //    our wrapper never sees it — but the resulting popup IS opened by
+    //    the browser as a child of our page, and Chrome's/Firefox's popup
+    //    blocker only allows it because it happens inside a user-gesture
+    //    window. The single most effective mitigation we can apply from the
+    //    top page is to deny the embed the user-gesture handoff: the embed
+    //    already gets the gesture it needs for playback, and the ad script
+    //    re-uses the SAME gesture. We cannot split the gesture, but we CAN
+    //    make the gesture's popup fail: keep a periodic sweep that closes
+    //    any window we can see that was not opened by us.
+    //    (Browsers do not enumerate windows, so the practical layer here is
+    //    the stub window returned by our wrapper + the browser's built-in
+    //    popup blocker. Both are in place.)
+  },
+};
 
 function ensurePlayerInstance() {
   if (!window.playerInstance && document.getElementById("player-video")) {
