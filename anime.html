@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title id="page-title">Anime Details - Kutta Anime</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="css/reset.css">
+    <link rel="stylesheet" href="css/variables.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+    <link rel="preconnect" href="https://image.tmdb.org">
+</head>
+<body>
+    <div class="app-wrapper">
+        <header class="site-header">
+            <div class="container">
+                <div class="header-inner">
+                    <a href="index.html" class="logo-link">
+                        <img class="logo-icon" src="logo/logo.png" alt=""
+                             width="32" height="32" decoding="async">
+                        <span>Kutta Anime</span>
+                    </a>
+                    <div class="search-wrapper">
+                        <span class="search-icon">🔍</span>
+                        <input type="search" id="search-input" class="search-input"
+                               placeholder="Search anime..." autocomplete="off">
+                        <div class="search-suggestions" id="search-suggestions"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="container">
+                <div id="anime-detail" class="anime-detail"></div>
+            </div>
+        </main>
+
+        <footer class="site-footer">
+            <div class="container">
+                <p class="footer-text">Kutta Anime</p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="js/utils.js"></script>
+    <script src="js/killswitch.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/backend-mode.js"></script>
+    <script src="js/components.js"></script>
+    <script>
+        // Curtain handover on the detail page.
+        //
+        // When the user clicks a card on the catalogue, the outgoing page
+        // shows the branded overlay immediately; this page resumes it and
+        // holds it until the detail header has actually rendered. Without
+        // this the user got a blank white page for the whole (uncached) info
+        // fetch — the overlay is not decoration, it is the perceived-load
+        // fix: the fetch happens underneath either way.
+        window.animeDetailReady = false;
+        (function () {
+            if (!Transition.resume()) return;
+            const started = Date.now();
+            const poll = setInterval(() => {
+                const header = document.querySelector("#anime-detail .detail-header");
+                const failed = document.querySelector("#anime-detail .error-panel");
+                if (header || failed || window.animeDetailReady || Date.now() - started > 8000) {
+                    clearInterval(poll);
+                    Transition.ready();
+                }
+            }, 60);
+        })();
+    </script>
+    <script>
+        // Anime Detail Page
+        class AnimeDetail {
+            constructor() {
+                this.anilistId = Utils.getQueryParam("id");
+                if (!this.anilistId) {
+                    window.location.href = "index.html";
+                    return;
+                }
+                this.init();
+            }
+
+            async init() {
+                await this.loadAnime();
+                this.setupSearch();
+            }
+            setupSearch() {
+                const searchBox = document.querySelector("#search-input");
+                if (!searchBox) return;
+                let timeout;
+                searchBox.addEventListener("input", Utils.debounce(async (e) => {
+                    const q = e.target.value.trim();
+                    if (q.length < 2) return;
+                    try {
+                        const data = await API.suggestions(q);
+                        const container = document.querySelector("#search-suggestions");
+                        container.innerHTML = "";
+                        container.classList.add("active");
+                        (data.results || []).forEach(media => {
+                            if (!media || !media.id) return;
+                            const title = Utils.getDisplayTitle(media);
+                            const a = Utils.el("a", {
+                                href: `anime.html?id=${media.id}`,
+                                className: "suggestion-item",
+                            }, [
+                                Utils.el("img", {
+                                    className: "suggestion-thumb",
+                                    src: media.thumbnail || "",
+                                    alt: "",
+                                }),
+                                Utils.el("span", { textContent: title }),
+                            ]);
+                            container.appendChild(a);
+                        });
+                    } catch (e) {}
+                }, 300));
+                document.addEventListener("click", (e) => {
+                    const container = document.querySelector("#search-suggestions");
+                    if (container && !searchBox.contains(e.target) && !container.contains(e.target)) {
+                        container.classList.remove("active");
+                    }
+                });
+            }
+
+            async loadAnime() {
+                const container = document.querySelector("#anime-detail");
+                if (!container) return;
+                container.innerHTML = "";
+                container.appendChild(Components.skeletonCard());
+
+                // Detail and episode list are independent calls, but the
+                // episode section must NOT be attached to the container
+                // before the info call resolves: renderDetail clears
+                // container.innerHTML, which used to wipe the just-appended
+                // episodes section and leave it updating a detached node —
+                // the "no episodes on any anime" bug. Load the episode data
+                // in parallel, but mount the section only after the header.
+                const episodesReady = this.loadEpisodes();
+
+                try {
+                    const data = await API.info(this.anilistId);
+                    if (!data || !data.id) {
+                        container.innerHTML = '<p style="color:var(--color-text-secondary);padding:40px;text-align:center;">Anime not found</p>';
+                        return;
+                    }
+                    container.innerHTML = "";
+                    this.media = data;
+                    this.renderDetail(data);
+                    window.animeDetailReady = true;
+                    await episodesReady;
+                } catch (err) {
+                    console.error(err);
+                    container.innerHTML = "";
+                    const error = Utils.el("div", { className: "error-panel" }, [
+                        Utils.el("p", {
+                            className: "error-title",
+                            textContent: "Error loading anime",
+                        }),
+                        Utils.el("p", { textContent: err && err.message ? err.message : String(err) }),
+                        Utils.el("p", {
+                            textContent: `Anime ID: ${this.anilistId}. Use Retry if this was a temporary network failure.`,
+                        }),
+                        Utils.el("button", {
+                            className: "btn btn-secondary",
+                            textContent: "Retry",
+                            onclick: () => this.loadAnime(),
+                        }),
+                    ]);
+                    container.appendChild(error);
+                }
+            }
+
+            renderDetail(media) {
+                document.title = `${media.title || "Anime"} - Kutta Anime`;
+
+                const container = document.querySelector("#anime-detail");
+                if (!container) return;
+
+                const bannerUrl = media.banner || "";
+                const genres = Array.isArray(media.genres) ? media.genres : [];
+
+                const detailHeader = Utils.el("div", { className: "detail-header" }, [
+                    bannerUrl ? Utils.el("div", {
+                        className: "detail-banner",
+                        style: `background-image: url('${bannerUrl}')`,
+                    }) : Utils.el("div", { className: "detail-banner placeholder-banner" }),
+                    Utils.el("div", { className: "detail-body container" }, [
+                        Utils.el("div", { className: "detail-poster-wrap" }, [
+                            Utils.el("img", {
+                                src: media.thumbnail || "",
+                                alt: media.title || "Poster",
+                                className: "detail-poster",
+                            }),
+                        ]),
+                        Utils.el("div", { className: "detail-info" }, [
+                            Utils.el("h1", { className: "detail-title", textContent: media.title || "Unknown" }),
+                            Utils.el("div", { className: "detail-meta" }, [
+                                media.seasonYear ? Utils.el("span", { className: "badge badge-sub", textContent: String(media.seasonYear) }) : null,
+                                media.format ? Utils.el("span", { className: "badge badge-movie", textContent: media.format }) : null,
+                                media.status ? Utils.el("span", { className: "badge badge-status", textContent: media.status }) : null,
+                                media.score ? Utils.el("span", { className: "badge", style: "background:rgba(255,215,0,0.15);color:#ffd700;", textContent: `★ ${media.score / 10}` }) : null,
+                            ].filter(Boolean)),
+                            Utils.el("div", { className: "detail-actions" }, [
+                                Utils.el("a", {
+                                    href: `watch.html?id=${media.id}&ep=1`,
+                                    className: "btn btn-primary",
+                                    textContent: "▶ Watch Episode 1",
+                                    onclick: (e) => {
+                                        e.preventDefault();
+                                        Transition.navigate(`watch.html?id=${media.id}&ep=1`, "Preparing stream");
+                                    },
+                                }),
+                                media.nextAiringEpisode ? Utils.el("span", { className: "next-air", textContent: `Next: Ep ${media.nextAiringEpisode.episode}` }) : null,
+                            ].filter(Boolean)),
+                            Utils.el("div", { className: "detail-genres" },
+                                genres.map(g => Utils.el("span", { className: "chip", textContent: g }))),
+                        ]),
+                    ]),
+                ]);
+                container.appendChild(detailHeader);
+
+                // Description
+                if (media.description) {
+                    const desc = Utils.el("div", { className: "detail-description container" });
+                    desc.innerHTML = `<h3 class="section-title">Synopsis</h3><p>${Utils.stripHtml(media.description)}</p>`;
+                    container.appendChild(desc);
+                }
+            }
+
+            async loadEpisodes() {
+                // The episode data fetch starts immediately (parallel with the
+                // info call), but the section itself mounts only after
+                // renderDetail has appended the header — appending before that
+                // gets wiped by the header's container.innerHTML = "" reset.
+                const dataReady = API.episodes(this.anilistId);
+                const detailEl = await new Promise((resolve) => {
+                    const el = document.querySelector("#anime-detail .detail-header");
+                    if (el) { resolve(el); return; }
+                    const timeout = setTimeout(() => { observer.disconnect(); resolve(null); }, 15000);
+                    const observer = new MutationObserver(() => {
+                        const el = document.querySelector("#anime-detail .detail-header");
+                        if (el) { clearTimeout(timeout); observer.disconnect(); resolve(el); }
+                    });
+                    observer.observe(document.querySelector("#anime-detail") || document.body, { childList: true, subtree: true });
+                });
+                if (!detailEl) return;
+                const epContainer = Utils.el("div", { className: "detail-episodes container" });
+                epContainer.innerHTML = '<h3 class="section-title">Episodes</h3>';
+                epContainer.appendChild(Utils.el("div", { className: "episode-grid" }, [
+                    Utils.el("div", { className: "spinner" })
+                ]));
+                detailEl.parentElement.appendChild(epContainer);
+
+                try {
+                    const data = await dataReady;
+                    const episodes = data.episodes || [];
+                    this.seasonInfo = data.seasonInfo || null;
+
+                    this.episodes = episodes.slice();
+                    this.currentPage = 1;
+                    this.totalPages = (data.pagination && data.pagination.totalPages) || 1;
+                    this.totalEpisodes = (data.pagination && typeof data.pagination.totalEpisodes === "number")
+                        ? data.pagination.totalEpisodes
+                        : episodes.length;
+
+                    // Season switcher. Rendered only when there is more than
+                    // one season, matching the backend's own withholding rule.
+                    const info = this.seasonInfo;
+                    if (info && Array.isArray(info.seasons) && info.seasons.length > 1) {
+                        epContainer.appendChild(this.seasonStrip(info));
+                    }
+
+                    epContainer.querySelector(".episode-grid").innerHTML = "";
+                    if (episodes.length === 0) {
+                        epContainer.querySelector(".episode-grid").appendChild(Components.noResults("No episodes found"));
+                        return;
+                    }
+
+                    const openEpisode = (ep) => {
+                        const url = `watch.html?id=${this.anilistId}&ep=${ep.episode}`;
+                        const label = ep.title ? ep.title : `Episode ${ep.episode}`;
+                        Transition.navigate(url, label);
+                    };
+
+                    // Jump-to-episode: type a number, the missing pages are
+                    // fetched, the list renders straight to that episode.
+                    const jumpToEpisode = async (num) => {
+                        const total = Math.max(this.totalEpisodes, this.episodes.length);
+                        if (!Number.isFinite(num) || num < 1 || (total > 0 && num > total)) {
+                            jumpInput.value = "";
+                            jumpInput.placeholder = total > 0 ? `1–${total}` : "Episode #";
+                            return false;
+                        }
+                        try {
+                            const full = await API.episodes(this.anilistId, 1, 1250);
+                            const seen = new Set(this.episodes.map(e => e.episode));
+                            (full.episodes || []).forEach(ep => {
+                                if (!seen.has(ep.episode)) {
+                                    seen.add(ep.episode);
+                                    this.episodes.push(ep);
+                                }
+                            });
+                            if (full.pagination) {
+                                if (typeof full.pagination.totalEpisodes === "number") {
+                                    this.totalEpisodes = full.pagination.totalEpisodes;
+                                }
+                                if (full.pagination.totalPages) {
+                                    this.totalPages = full.pagination.totalPages;
+                                }
+                            }
+                            this.currentPage = 1;
+                        } catch (err) {
+                            console.error("Jump: failed to load episode list", err);
+                        }
+                        this.episodes.sort((a, b) => a.episode - b.episode);
+
+                        revealed = Math.max(
+                            revealed,
+                            this.episodes.filter(e => e.episode <= num).length
+                        );
+                        grid.innerHTML = "";
+                        this.episodes.slice(0, revealed).forEach(ep => grid.appendChild(makeItem(ep)));
+                        const target = grid.querySelector(`[data-episode="${num}"]`);
+                        if (target) {
+                            target.scrollIntoView({ behavior: "smooth", block: "center" });
+                            target.classList.add("ep-jump-flash");
+                            setTimeout(() => target.classList.remove("ep-jump-flash"), 2000);
+                        }
+                        jumpInput.value = "";
+                        jumpInput.blur();
+                        if (loadMore && loadMore.isConnected) loadMore.remove();
+                        return true;
+                    };
+
+                    const jumpWrap = Utils.el("div", { className: "ep-jump" });
+                    jumpWrap.appendChild(Utils.el("span", {
+                        className: "ep-jump-label",
+                        textContent: "Jump to episode",
+                    }));
+                    const jumpInput = Utils.el("input", {
+                        className: "ep-jump-input",
+                        type: "number",
+                        min: "1",
+                        placeholder: `1–${Math.max(this.totalEpisodes, this.episodes.length)}`,
+                        "aria-label": "Jump to episode number",
+                    });
+                    const jumpGo = Utils.el("button", {
+                        className: "btn btn-secondary btn-sm",
+                        textContent: "Go",
+                        onclick: () => jumpToEpisode(parseInt(jumpInput.value, 10)),
+                    });
+                    jumpInput.addEventListener("keydown", (e) => {
+                        if (e.key === "Enter") jumpToEpisode(parseInt(jumpInput.value, 10));
+                    });
+                    jumpWrap.appendChild(jumpInput);
+                    jumpWrap.appendChild(jumpGo);
+
+                    const makeItem = (ep) => {
+                        const item = Components.episodeItem(ep, {
+                            image: Components.episodeArtwork(this.media || {}),
+                        });
+                        item.addEventListener("click", () => openEpisode(ep));
+                        return item;
+                    };
+
+                    const grid = epContainer.querySelector(".episode-grid");
+                    const BATCH = 12;
+                    let revealed = 0;
+
+                    const renderBatch = () => {
+                        const frag = document.createDocumentFragment();
+                        this.episodes.slice(revealed, revealed + BATCH).forEach(ep => frag.appendChild(makeItem(ep)));
+                        revealed += Math.min(BATCH, this.episodes.length - revealed);
+                        grid.appendChild(frag);
+                    };
+                    renderBatch();
+
+                    const remainingCount = () =>
+                        Math.max(this.totalEpisodes, this.episodes.length) - revealed;
+
+                    let loadMore = null;
+
+                    const jumpTotal = Math.max(this.totalEpisodes, this.episodes.length);
+                    if (jumpTotal > 30) {
+                        epContainer.insertBefore(jumpWrap, grid);
+                        if (jumpTotal > 60) {
+                            jumpWrap.appendChild(Utils.el("button", {
+                                className: "btn btn-secondary btn-sm",
+                                textContent: "Latest",
+                                onclick: () => jumpToEpisode(jumpTotal),
+                            }));
+                        }
+                    }
+
+                    if (remainingCount() > 0) {
+                        loadMore = Utils.el("button", {
+                            className: "btn btn-secondary",
+                            style: "margin: 16px auto; display: block;",
+                            textContent: `Load more (${remainingCount()} left)`,
+                        });
+                        loadMore.addEventListener("click", async () => {
+                            if (revealed < this.episodes.length) {
+                                renderBatch();
+                            } else if (this.currentPage < this.totalPages) {
+                                loadMore.disabled = true;
+                                loadMore.textContent = "Loading...";
+                                try {
+                                    const next = await API.episodes(this.anilistId, this.currentPage + 1, 50);
+                                    this.currentPage++;
+                                    if (next.pagination && typeof next.pagination.totalEpisodes === "number") {
+                                        this.totalEpisodes = next.pagination.totalEpisodes;
+                                    }
+                                    if (next.pagination && next.pagination.totalPages) {
+                                        this.totalPages = Math.max(this.totalPages, next.pagination.totalPages);
+                                    }
+                                    const seen = new Set(this.episodes.map(e => e.episode));
+                                    (next.episodes || []).forEach(ep => {
+                                        if (!seen.has(ep.episode)) this.episodes.push(ep);
+                                    });
+                                } catch (err) {
+                                    console.error("Failed to load next episode page", err);
+                                }
+                                loadMore.disabled = false;
+                                renderBatch();
+                            }
+                            const remaining = remainingCount();
+                            if (remaining <= 0) {
+                                loadMore.remove();
+                            } else {
+                                loadMore.textContent = `Load more (${remaining} left)`;
+                            }
+                        });
+                        epContainer.appendChild(loadMore);
+                    }
+
+                } catch (err) {
+                    epContainer.querySelector(".episode-grid").innerHTML = "";
+                    epContainer.querySelector(".episode-grid").appendChild(Components.noResults("Failed to load episodes"));
+                }
+            }
+
+            seasonStrip(info) {
+                const strip = Utils.el("div", { className: "season-strip" });
+                strip.appendChild(Utils.el("span", {
+                    className: "season-strip-label",
+                    textContent: "Seasons",
+                }));
+
+                const list = Utils.el("div", { className: "season-list" });
+                (info.seasons || []).forEach(season => {
+                    if (!season || !season.anilistId) return;
+                    const isCurrent = season.anilistId === Number(this.anilistId);
+                    const label = season.order
+                        ? `Season ${season.order}`
+                        : (season.title || "Season");
+                    const chip = Utils.el(isCurrent ? "span" : "a", {
+                        className: `season-chip${isCurrent ? " is-current" : ""}`,
+                        ...(isCurrent ? {} : { href: `anime.html?id=${season.anilistId}` }),
+                    }, [
+                        Utils.el("span", { textContent: label }),
+                        season.episodeCount ? Utils.el("span", {
+                            className: "season-chip-count",
+                            textContent: `${season.episodeCount} ep`,
+                        }) : null,
+                    ].filter(Boolean));
+                    list.appendChild(chip);
+                });
+                strip.appendChild(list);
+                return strip;
+            }
+        }
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", () => {
+            window.animeDetail = new AnimeDetail();
+          });
+        } else {
+          window.animeDetail = new AnimeDetail();
+        }
+    </script>
+    <style>
+        .detail-header { position: relative; margin-bottom: 16px; }
+        .detail-banner {
+            width: 100%;
+            height: 240px;
+            background-size: cover;
+            background-position: center;
+            border-radius: var(--radius-lg);
+            position: relative;
+        }
+        .detail-banner::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to bottom, rgba(5,7,10,0.4) 0%, rgba(5,7,10,0.95) 60%, rgba(5,7,10,0.98) 100%);
+        }
+        .detail-banner.placeholder-banner { background: var(--color-border); }
+        .detail-body {
+            display: flex;
+            align-items: flex-start;
+            gap: 20px;
+            position: relative;
+            z-index: 1;
+            margin-top: -120px;
+        }
+        @media (max-width: 767px) {
+            .detail-banner { height: 160px; }
+            .detail-body { flex-direction: column; gap: 0; margin-top: -70px; }
+        }
+        .detail-poster-wrap {
+            margin-top: -100px;
+            flex-shrink: 0;
+        }
+        @media (max-width: 767px) {
+            .detail-poster-wrap { margin-top: -80px; }
+        }
+        .detail-poster {
+            width: 140px;
+            height: 210px;
+            object-fit: cover;
+            border-radius: var(--radius-md);
+            box-shadow: 0 8px 24px -8px var(--color-shadow-strong);
+        }
+        @media (max-width: 767px) {
+            .detail-poster { width: 100px; height: 150px; }
+        }
+        .detail-info { flex: 1; }
+        .detail-title { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+        @media (max-width: 639px) { .detail-title { font-size: 20px; } }
+        .detail-meta { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+        .detail-actions { display: flex; gap: 12px; align-items: center; margin: 16px 0; flex-wrap: wrap; }
+        .detail-genres { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+        .next-air { font-size: 13px; color: var(--color-text-secondary); }
+        .detail-episodes { margin-top: 24px; }
+        .episode-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+        @media (max-width: 639px) { .episode-grid { grid-template-columns: repeat(2, 1fr); } }
+        .ep-jump {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0 0 14px;
+            flex-wrap: wrap;
+        }
+        .ep-jump-label { font-size: 13px; color: var(--color-text-secondary); }
+        .ep-jump-input {
+            width: 110px;
+            padding: 8px 12px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border-input);
+            border-radius: var(--radius-md);
+            color: var(--color-text);
+            font-size: 14px;
+            font-family: inherit;
+            -moz-appearance: textfield;
+        }
+        .ep-jump-input::-webkit-outer-spin-button,
+        .ep-jump-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .ep-jump-input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+        }
+        .episode-item.ep-jump-flash {
+            outline: 2px solid var(--color-primary);
+            outline-offset: 2px;
+            animation: ep-jump-pulse 1s ease-in-out 2;
+        }
+        @keyframes ep-jump-pulse {
+            0%, 100% { box-shadow: none; }
+            50% { box-shadow: 0 0 0 6px var(--color-primary-fade); }
+        }
+        .description h3 { font-size: 18px; }
+        .description p { color: var(--color-text-secondary); font-size: 14px; line-height: 1.6; }
+        .detail-description { margin-top: 24px; }
+        .detail-description p { color: var(--color-text-secondary); font-size: 14px; line-height: 1.6; }
+        .error-panel {
+            max-width: 560px;
+            margin: 40px auto;
+            padding: 24px;
+            text-align: center;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+        }
+        .error-panel .error-title { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+        .error-panel p { color: var(--color-text-secondary); font-size: 13px; margin-bottom: 8px; }
+    </style>
+</body>
+</html>

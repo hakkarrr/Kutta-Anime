@@ -1,0 +1,160 @@
+:root {
+  /* Enhanced color palette matching Movy's refined design */
+  --color-bg: #05070a;
+  --color-bg-alt: #0a0d15;
+  --color-bg-card: #0c0f17;
+  --color-bg-card-hover: #121620;
+  --color-bg-input: #141823;
+  --color-bg-overlay: rgba(5, 7, 10, 0.92);
+  --color-panel: rgba(255,255,255,.04);
+  --color-panel-hi: rgba(255,255,255,.08);
+  --color-line: rgba(255,255,255,.06);
+  --color-line-hi: rgba(255,255,255,.14);
+
+  --color-text: #f5f6fa;
+  --color-text-secondary: #a0a4b1;
+  --color-text-tertiary: #7a7f95;
+  --color-text-muted: #5a6075;
+  --color-text-hi: #ffffff;
+  --color-text-mid: rgba(255,255,255,.64);
+  --color-text-low: rgba(255,255,255,.45);
+
+  /* Primary brand color with extended palette */
+  --color-primary: #eb0d18;
+  --color-primary-dark: #c70b14;
+  --color-primary-hover: #ff2b30;
+  --color-primary-fade: rgba(235, 13, 24, 0.15);
+  --color-primary-subtle: rgba(235, 13, 24, 0.08);
+  
+  /* Accent palette for highlights and CTAs */
+  --color-accent: #7c5cff;
+  --color-accent-hover: #906fff;
+  --color-accent-fade: rgba(124, 92, 255, 0.15);
+
+  /* Extended semantic colors for different types */
+  --color-sub: #ff9900;
+  --color-sub-hover: #ffb633;
+  --color-sub-fade: rgba(255, 153, 0, 0.15);
+  
+  --color-dub: #3b82f6;
+  --color-dub-hover: #60a5fa;
+  --color-dub-fade: rgba(59, 130, 246, 0.15);
+  
+  --color-movie: #a855f7;
+  --color-movie-hover: #c084fc;
+  --color-movie-fade: rgba(168, 85, 247, 0.15);
+  
+  --color-status: #10b981;
+  --color-status-hover: #34d399;
+  --color-status-fade: rgba(16, 185, 129, 0.15);
+  
+  --color-status-hiatus: #f59e0b;
+  --color-status-hiatus-hover: #fbbf24;
+  --color-status-hiatus-fade: rgba(245, 158, 11, 0.15);
+  
+  --color-status-cancelled: #ef4444;
+  --color-status-cancelled-hover: #f87171;
+  --color-status-cancelled-fade: rgba(239, 68, 68, 0.15);
+
+  /* Enhanced border and shadow system */
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-hover: rgba(255, 255, 255, 0.18);
+  --color-border-input: rgba(255, 255, 255, 0.12);
+  --color-border-subtle: rgba(255, 255, 255, 0.04);
+
+  --color-shadow: rgba(0, 0, 0, 0.4);
+  --color-shadow-strong: rgba(0, 0, 0, 0.7);
+  --color-shadow-stronger: rgba(0, 0, 0, 0.85);
+  --color-shadow-accent: rgba(235, 13, 24, 0.3);
+  --color-shadow-accent-hover: rgba(235, 13, 24, 0.5);
+
+  /* Enhanced radius system for more sophisticated shapes */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-xxl: 28px;
+  --radius-full: 9999px;
+
+  /* Refined transition system */
+  --transition-fast: 0.15s ease;
+  --transition-norm: 0.25s ease;
+  --transition-slow: 0.4s ease;
+  --transition-bounce: 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "Fira Code", "SFMono-Regular", Consolas, monospace;
+
+  /* Enhanced breakpoints for better responsive control */
+  --mobile: 639px;
+  --tablet: 767px;
+  --tablet-up: 768px;
+  --desktop: 1023px;
+  --desktop-up: 1024px;
+  --wide: 1279px;
+  --wide-up: 1280px;
+  --ultra: 1440px;
+
+  /* Enhanced card dimensions for better grid balance */
+  --card-w-xs: 140px;
+  --card-w-sm: 160px;
+  --card-w-md: 180px;
+  --card-w-lg: 200px;
+  --card-w-xl: 220px;
+  --card-w-xxl: 240px;
+  
+  /* Enhanced card radius for modern feel */
+  --card-radius: var(--radius-lg);
+  --card-radius-mobile: var(--radius-md);
+  
+  /* Enhanced spacing system */
+  --space-3xs: 2px;
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 40px;
+  --space-3xl: 56px;
+  --space-4xl: 80px;
+  
+  /* Hero and banner scaling */
+  --hero-height-mobile: 320px;
+  --hero-height-tablet: 480px;
+  --hero-height-desktop: 660px;
+  
+  /* Z-index system for layering */
+  --z-backdrop: -1;
+  --z-surface: 1;
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-fixed: 30;
+  --z-modal: 40;
+  --z-popover: 50;
+  --z-toast: 60;
+  --z-tooltip: 70;
+  
+  /* Enhanced glassmorphism system */
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-bg-hover: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-border-hover: rgba(255, 255, 255, 0.12);
+  --glass-blur: 12px;
+  --glass-saturate: 140%;
+  
+  /* Enhanced gradient system */
+  --gradient-primary: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  --gradient-bg: linear-gradient(180deg, var(--color-bg) 0%, var(--color-bg-alt) 100%);
+  --gradient-card: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 100%);
+}
+
+@media (max-width: 639px) {
+  :root {
+    --card-w-xs: 110px;
+    --card-w-sm: 120px;
+    --card-w-md: 130px;
+    --card-w-lg: 140px;
+  }
+}

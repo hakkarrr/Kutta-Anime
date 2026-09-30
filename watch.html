@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title id="page-title">Watching - Kutta Anime</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="css/reset.css">
+    <link rel="stylesheet" href="css/variables.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/player.css">
+</head>
+<body>
+    <div class="app-wrapper">
+        <header class="site-header">
+            <div class="container">
+                <div class="header-inner">
+                    <a href="index.html" id="logo-link" class="logo-link">
+                        <img class="logo-icon" src="logo/logo.png" alt=""
+                             width="32" height="32" decoding="async">
+                        <span>Kutta Anime</span>
+                    </a>
+                    <div class="search-wrapper">
+                        <span class="search-icon">🔍</span>
+                        <input
+                            type="search"
+                            id="search-input"
+                            class="search-input"
+                            placeholder="Search anime..."
+                            autocomplete="off"
+                            spellcheck="false"
+                        >
+                        <div class="search-suggestions" id="search-suggestions"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <div class="container">
+                <div class="watch-layout">
+                    <!-- Player Section -->
+                    <div class="player-section">
+                        <div class="player-container" id="player-container">
+                            <div class="video-wrapper">
+                                <video
+                                    id="player-video"
+                                    playsinline
+                                    webkit-playsinline
+                                    x5-playsite="true"
+                                    x5-video-player-type="hls"
+                                    controls
+                                >
+                                    <!-- Stream loaded by player.js -->
+                                </video>
+                                <div class="player-overlay">
+                                    <div class="player-top-bar">
+                                        <div class="player-title-bar">
+                                            <span class="player-title" id="player-title">Title</span>
+                                        </div>
+                                    </div>
+                                    <div class="player-controls-bottom">
+                                        <div class="progress-container-wrapper">
+                                            <div class="progress-container" id="progress-container">
+                                                <div class="progress-bar-bg"></div>
+                                                <div class="progress-bar" id="progress-bar"></div>
+                                            </div>
+                                        </div>
+                                        <div class="player-controls-main">
+                                            <button class="control-btn" id="play-pause-btn">
+                                                <span id="play-pause-icon">▶</span>
+                                            </button>
+                                            <button class="control-btn" id="rewind-btn">⏪</button>
+                                            <button class="control-btn" id="forward-btn">⏭</button>
+                                            <div class="player-time-display">
+                                                <span id="current-time">0:00</span>
+                                                <span>/</span>
+                                                <span id="duration">—:—</span>
+                                            </div>
+                                            <button class="control-btn" id="volume-btn">
+                                                <span id="volume-icon">🔊</span>
+                                            </button>
+                                            <button class="control-btn" id="settings-btn">⚙</button>
+                                            <button class="control-btn" id="quality-btn" style="display:none;">
+                                                <span id="quality-current">HD</span>
+                                            </button>
+                                            <div class="quality-dropdown" id="quality-dropdown">
+                                                <div class="dropdown-item active" data-quality="auto">Auto</div>
+                                            </div>
+                                            <select class="subtitle-selector" id="subtitle-selector" style="display:none;">
+                                                <option value="off">Subtitles: Off</option>
+                                            </select>
+                                            <button class="control-btn" id="subtitle-btn">💬</button>
+                                            <button class="control-btn fullscreen-btn" id="fullscreen-btn">⛶</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="player-buffering" id="player-buffering" style="display:none;">
+                                    <div class="spinner"></div>
+                                </div>
+                                <div class="player-error" id="player-error" style="display:none;">
+                                    <span id="error-message"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="provider-info">
+                            <span class="provider-badge" id="player-provider">Loading...</span>
+                            <!-- Mobile only: quick episode switcher without
+                                 opening the full sidebar overlay. -->
+                            <select class="mobile-episode-select" id="mobile-episode-select"
+                                    aria-label="Select episode" style="display:none;"></select>
+                            <!-- Mobile only: the sidebar is an overlay there. -->
+                            <button type="button" class="btn btn-secondary btn-sm episode-toggle"
+                                    id="episode-toggle" aria-expanded="false">Episodes</button>
+                        </div>
+                        <button class="btn btn-secondary" id="skip-btn" style="display:none;">
+                            Skip Intro
+                        </button>
+                    </div>
+
+                    <!-- Episode Sidebar (overlay on mobile) -->
+                    <div class="episode-sidebar" id="episode-sidebar">
+                        <div class="episode-sidebar-header">
+                            <h3 class="episode-sidebar-title">Episodes</h3>
+                            <button class="control-btn episode-close" id="episode-close">✕</button>
+                        </div>
+                        <div class="episode-list" id="episode-list">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    <div class="overlay-backdrop" id="overlay-backdrop"></div>
+                </div>
+
+                <!-- Media Info Below Player -->
+                <div class="watch-info">
+                    <h1 class="watch-title" id="watch-title">Title</h1>
+                    <div class="watch-meta" id="watch-meta">
+                        <!-- Score, year, format -->
+                    </div>
+                    <p class="watch-description" id="watch-description"></p>
+                    <div class="watch-genres" id="watch-genres"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/utils.js"></script>
+    <script src="js/killswitch.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/backend-mode.js"></script>
+    <script src="js/components.js"></script>
+    <!-- Header search lives in App; bootApp() finds no #home-content here. -->
+    <script src="js/app.js"></script>
+    <script src="js/player.js"></script>
+    <script>
+        // Watch page logic
+        class WatchPage {
+            constructor() {
+                this.anilistId = Utils.getQueryParam("id");
+                this.episode = parseInt(Utils.getQueryParam("ep", "1"));
+                this.allEpisodes = [];
+                this.maxPageLoaded = 1;
+                this.epPagination = null;
+                if (!this.anilistId) {
+                    window.location.href = "index.html";
+                    return;
+                }
+                this.init();
+            }
+
+            async init() {
+                // Header search, using the same implementation as the
+                // catalogue and detail pages.
+                if (typeof App === "function" && App.attachSearch) App.attachSearch();
+
+                // Cover the whole boot: metadata + episode list + stream
+                // resolution is the longest wait in the app, so the curtain
+                // stays up until the player has something (or has failed).
+                //
+                // If we navigated here from another page its curtain is
+                // already up and carries over; otherwise this opens a fresh
+                // one. Either way `ready()` is what lifts it.
+                const carried = Transition.resume();
+                if (!carried) Transition.show("Loading episode");
+                try {
+                    await this.loadMediaInfo();
+                    await this.loadEpisodes();
+                    await this.loadAndPlay();
+                    this.setupControls();
+                } finally {
+                    Transition.ready();
+                }
+            }
+
+            async loadMediaInfo() {
+                try {
+                    const media = await API.info(this.anilistId);
+                    if (!media || !media.id) return;
+                    this.media = media;
+
+                    document.title = media.title + " - Kutta Anime";
+                    document.getElementById("watch-title").textContent = media.title;
+                    document.getElementById("player-title").textContent = media.title;
+
+                    const meta = document.getElementById("watch-meta");
+                    meta.innerHTML = "";
+                    if (media.score) {
+                        meta.innerHTML += `<span class="badge" style="background:rgba(255,215,0,0.15);color:#ffd700;">★ ${media.score / 10}</span>`;
+                    }
+                    if (media.seasonYear) {
+                        meta.innerHTML += `<span class="badge badge-sub">${media.seasonYear}</span>`;
+                    }
+                    if (media.format) {
+                        meta.innerHTML += `<span class="badge badge-movie">${media.format}</span>`;
+                    }
+
+                    if (media.description) {
+                        document.getElementById("watch-description").textContent =
+                            Utils.stripHtml(media.description);
+                    }
+                    if (media.genres) {
+                        document.getElementById("watch-genres").innerHTML =
+                            media.genres.map(g => `<span class="chip">${g}</span>`).join("");
+                    }
+                } catch (err) {
+                    console.error(err);
+                }
+            }
+
+
+
+            async loadEpisodes() {
+                try {
+                    // The backend paginates server-side. Load the first page,
+                    // then (only if needed) the page containing the episode
+                    // actually being watched — a deep link to ep 1100 of One
+                    // Piece must still be listed and highlighted. Remaining
+                    // pages load on demand via the "Load more" button.
+                    const PER_PAGE = 50;
+                    const data = await API.episodes(this.anilistId, 1, PER_PAGE);
+                    this.allEpisodes = (data.episodes || []).slice();
+                    this.seasonInfo = data.seasonInfo || null;
+                    this.epPagination = data.pagination || null;
+
+                    // Deep-linked episode outside page 1: fetch its page too.
+                    const hasCurrent = this.allEpisodes.some(e => e.episode === this.episode);
+                    const totalPages = (this.epPagination && this.epPagination.totalPages) || 1;
+                    if (!hasCurrent && totalPages > 1) {
+                        const targetPage = Math.min(
+                            totalPages,
+                            Math.max(1, Math.ceil(this.episode / PER_PAGE))
+                        );
+                        try {
+                            const extra = await API.episodes(this.anilistId, targetPage, PER_PAGE);
+                            this.mergeEpisodes(extra.episodes || []);
+                            if (extra.pagination) this.epPagination = extra.pagination;
+                        } catch (err) {
+                            console.error("Failed to load page with current episode", err);
+                        }
+                    }
+                    this.sortEpisodes();
+
+                    const list = document.getElementById("episode-list");
+                    list.innerHTML = "";
+
+                    // Season context: the sidebar lists one season, so without
+                    // this header there is no indication that other seasons
+                    // exist or which one is open.
+                    list.appendChild(this.seasonHeader());
+
+                    // Jump-to-episode for long shows: scrolling 24 "Load more"
+                    // batches to find ep 1100 of One Piece is not usable. One
+                    // full-list fetch (backend clamps per_page to 1250) fills
+                    // the sidebar completely, so no Load more button is needed
+                    // after a jump.
+                    const jumpTotal = (this.epPagination && typeof this.epPagination.totalEpisodes === "number")
+                        ? this.epPagination.totalEpisodes
+                        : this.allEpisodes.length;
+                    if (jumpTotal > 30) {
+                        const jumpWrap = Utils.el("div", { className: "ep-jump ep-jump-sidebar" });
+                        const jumpInput = Utils.el("input", {
+                            className: "ep-jump-input",
+                            type: "number",
+                            min: "1",
+                            placeholder: `1–${jumpTotal}`,
+                            "aria-label": "Jump to episode number",
+                        });
+                        const doJump = async () => {
+                            const num = parseInt(jumpInput.value, 10);
+                            if (!Number.isFinite(num) || num < 1 || (jumpTotal > 0 && num > jumpTotal)) {
+                                jumpInput.value = "";
+                                jumpInput.placeholder = `1–${jumpTotal}`;
+                                return;
+                            }
+                            try {
+                                const full = await API.episodes(this.anilistId, 1, 1250);
+                                this.mergeEpisodes(full.episodes || []);
+                                if (full.pagination) this.epPagination = full.pagination;
+                            } catch (err) {
+                                console.error("Jump: failed to load episode list", err);
+                            }
+                            // Re-render the whole sidebar from the merged list.
+                            const items = [];
+                            const watched = this.watchedEpisodes();
+                            this.allEpisodes.forEach(ep => {
+                                const item = Components.episodeItem(ep, {
+                                    image: artwork,
+                                    active: ep.episode === this.episode,
+                                    watched: watched.has(Number(ep.episode)) && ep.episode !== this.episode,
+                                });
+                                item.addEventListener("click", () => {
+                                    if (ep.episode === this.episode) return;
+                                    Transition.navigate(
+                                        `watch.html?id=${this.anilistId}&ep=${ep.episode}`,
+                                        ep.title || `Episode ${ep.episode}`
+                                    );
+                                });
+                                items.push(item);
+                            });
+                            // Replace everything below the header + jump bar.
+                            while (list.lastChild && list.lastChild !== jumpWrap) {
+                                list.removeChild(list.lastChild);
+                            }
+                            items.forEach(item => list.appendChild(item));
+                            this.fillMobileEpisodeSelect();
+                            const target = items.find(item =>
+                                Number(item.dataset.episode) === num);
+                            if (target && target.scrollIntoView) {
+                                const offset = target.offsetTop - list.clientHeight / 2;
+                                list.scrollTop = Math.max(0, offset);
+                            }
+                            jumpInput.value = "";
+                            jumpInput.blur();
+                        };
+                        jumpInput.addEventListener("keydown", (e) => {
+                            if (e.key === "Enter") doJump();
+                        });
+                        jumpWrap.appendChild(jumpInput);
+                        if (jumpTotal > 60) {
+                            jumpWrap.appendChild(Utils.el("button", {
+                                className: "btn btn-secondary btn-sm",
+                                textContent: "Latest",
+                                type: "button",
+                                onclick: () => {
+                                    jumpInput.value = String(jumpTotal);
+                                    doJump();
+                                },
+                            }));
+                        }
+                        list.appendChild(jumpWrap);
+                    }
+
+                    // Same 16:9 artwork card the detail page uses, so an
+                    // episode looks identical in both places.
+                    const artwork = Components.episodeArtwork(this.media || {});
+                    const watched = this.watchedEpisodes();
+
+                    this.allEpisodes.forEach(ep => {
+                        const item = Components.episodeItem(ep, {
+                            image: artwork,
+                            active: ep.episode === this.episode,
+                            watched: watched.has(Number(ep.episode)) && ep.episode !== this.episode,
+                        });
+                        item.addEventListener("click", () => {
+                            if (ep.episode === this.episode) return;
+                            const label = ep.title || `Episode ${ep.episode}`;
+                            Transition.navigate(
+                                `watch.html?id=${this.anilistId}&ep=${ep.episode}`,
+                                label
+                            );
+                        });
+                        list.appendChild(item);
+                    });
+
+                    // Bring the episode being watched into view without moving
+                    // the page itself.
+                    const current = list.querySelector(".episode-item.ep-active");
+                    if (current && current.scrollIntoView) {
+                        const offset = current.offsetTop - list.clientHeight / 2;
+                        list.scrollTop = Math.max(0, offset);
+                    } else {
+                        list.scrollTop = 0;
+                    }
+
+                    // Load more button for the remaining server pages.
+                    const totalEpisodes = (this.epPagination && this.epPagination.totalEpisodes) || this.allEpisodes.length;
+                    const remaining = Math.max(totalEpisodes - this.allEpisodes.length, 0);
+                    if (remaining > 0 && totalPages > 1) {
+                        const loadMore = Utils.el("button", {
+                            className: "btn btn-secondary btn-sm",
+                            style: "margin: 10px auto; display: block; width: calc(100% - 16px);",
+                            textContent: `Load more (${remaining} left)`,
+                        });
+                        loadMore.addEventListener("click", async () => {
+                            loadMore.disabled = true;
+                            loadMore.textContent = "Loading...";
+                            try {
+                                const per = (this.epPagination && this.epPagination.perPage) || 50;
+                                const next = await API.episodes(this.anilistId, this.maxPageLoaded + 1, per);
+                                this.maxPageLoaded = Math.max(this.maxPageLoaded || 1, (next.pagination && next.pagination.page) || this.maxPageLoaded + 1);
+                                this.mergeEpisodes(next.episodes || []);
+                                if (next.pagination) this.epPagination = next.pagination;
+                                const remainingNow = Math.max(
+                                    ((this.epPagination && this.epPagination.totalEpisodes) || this.allEpisodes.length) - this.allEpisodes.length,
+                                    0
+                                );
+                                if (remainingNow <= 0) {
+                                    loadMore.remove();
+                                } else {
+                                    loadMore.textContent = `Load more (${remainingNow} left)`;
+                                }
+                                this.fillMobileEpisodeSelect();
+                            } catch (err) {
+                                console.error("Failed to load more episodes", err);
+                                loadMore.textContent = "Load more (retry)";
+                            } finally {
+                                loadMore.disabled = false;
+                            }
+                        });
+                        list.appendChild(loadMore);
+                    }
+
+                    this.fillMobileEpisodeSelect();
+                } catch (err) {
+                    console.error(err);
+                }
+            }
+
+            /** Merge a fetched page into the sidebar list, dedup + sort. */
+            mergeEpisodes(incoming) {
+                const seen = new Set(this.allEpisodes.map(e => e.episode));
+                (incoming || []).forEach(ep => {
+                    if (ep && !seen.has(ep.episode)) {
+                        seen.add(ep.episode);
+                        this.allEpisodes.push(ep);
+                    }
+                });
+                this.allEpisodes.sort((a, b) => a.episode - b.episode);
+            }
+
+            /**
+             * Mobile-only quick episode switcher: a compact <select> beside
+             * the provider badge, so an episode can be changed during playback
+             * without opening the full sidebar overlay. Hidden on desktop,
+             * where the sidebar is permanently visible.
+             */
+            fillMobileEpisodeSelect() {
+                const select = document.getElementById("mobile-episode-select");
+                if (!select || this.allEpisodes.length === 0) return;
+
+                select.innerHTML = "";
+                this.allEpisodes.forEach(ep => {
+                    const label = ep.title
+                        ? `EP ${ep.episode} · ${ep.title}`
+                        : `Episode ${ep.episode}`;
+                    const opt = Utils.el("option", {
+                        value: String(ep.episode),
+                        textContent: label,
+                    });
+                    if (ep.episode === this.episode) opt.selected = true;
+                    select.appendChild(opt);
+                });
+
+                // Only shown on small screens; the desktop sidebar already
+                // lists every episode permanently.
+                const applyVisibility = () => {
+                    select.style.display = window.innerWidth <= 768 ? "" : "none";
+                };
+                applyVisibility();
+                window.addEventListener("resize", applyVisibility);
+            }
+
+            /** Keep the list ordered even when pages arrive out of order. */
+            sortEpisodes() {
+                this.allEpisodes.sort((a, b) => a.episode - b.episode);
+            }
+
+            /**
+             * Sidebar header naming the open season, with a link to the detail
+             * page (where every season is listed) when the show has more than
+             * one. A single-season show gets a plain label.
+             */
+            seasonHeader() {
+                const wrap = Utils.el("div", { className: "sidebar-season" });
+                const info = this.seasonInfo;
+                // Report the show's true episode count, not how many happen to
+                // be loaded so far — the sidebar paginates, so the loaded slice
+                // (50 of 1184 for One Piece) would otherwise read as the total.
+                const total = (this.epPagination && typeof this.epPagination.totalEpisodes === "number")
+                    ? this.epPagination.totalEpisodes
+                    : this.allEpisodes.length;
+                const count = total;
+
+                if (!info || !info.totalSeasons || info.totalSeasons < 2) {
+                    wrap.appendChild(Utils.el("span", {
+                        className: "sidebar-season-name",
+                        textContent: `${count} episode${count === 1 ? "" : "s"}`,
+                    }));
+                    return wrap;
+                }
+
+                const order = info.currentSeasonOrder;
+                wrap.appendChild(Utils.el("span", {
+                    className: "sidebar-season-name",
+                    textContent: order ? `Season ${order} of ${info.totalSeasons}` : "Season",
+                }));
+                wrap.appendChild(Utils.el("span", {
+                    className: "sidebar-season-count",
+                    textContent: `${count} episode${count === 1 ? "" : "s"}`,
+                }));
+
+                const link = Utils.el("a", {
+                    className: "sidebar-season-link",
+                    href: `anime.html?id=${this.anilistId}`,
+                    textContent: "All seasons",
+                });
+                wrap.appendChild(link);
+                return wrap;
+            }
+
+            /** Episodes with a saved playback position (see the player). */
+            watchedEpisodes() {
+                const found = new Set();
+                try {
+                    const prefix = `ka_pos_${this.anilistId}_`;
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const key = localStorage.key(i);
+                        if (!key || key.indexOf(prefix) !== 0) continue;
+                        const value = parseFloat(localStorage.getItem(key));
+                        if (value > 0) found.add(Number(key.slice(prefix.length)));
+                    }
+                } catch (e) {
+                    // Storage disabled: no badges.
+                }
+                return found;
+            }
+
+            /**
+             * Classify one stream, never throwing.
+             *
+             * `Utils.streamKind` is the single source of truth, but a stale
+             * cached utils.js previously made this exact call throw
+             * "Utils.streamKind is not a function" and killed the whole
+             * source list. A classification problem must degrade to one bad
+             * source, not to a blank player, so fall back inline.
+             */
+            classify(s) {
+                try {
+                    if (Utils && typeof Utils.streamKind === "function") {
+                        return Utils.streamKind(s);
+                    }
+                } catch (err) {
+                    console.warn("streamKind failed, using inline fallback", err);
+                }
+                return WatchPage.fallbackKind(s);
+            }
+
+            /** Minimal inline classifier used only if Utils is unavailable. */
+            static fallbackKind(stream) {
+                const url = (stream && (stream.proxied || stream.url || stream.videoUrl)) || "";
+                const declared = String((stream && stream.type) || "").toLowerCase();
+                if (declared === "hls" || declared === "dash") return declared;
+                if (/\/embed_relay\//i.test(url)) return "embed";
+                if (/\.m3u8(\?|$)/i.test(url)) return "hls";
+                if (/\.mpd(\?|$)/i.test(url)) return "dash";
+                if (/\/proxy_(m3u8|segment)\//i.test(url)) return declared === "dash" ? "dash" : "hls";
+                if (/megaplay|myvidplay|playmogo|mfw\d*\.|vidnest|\/e\/|\/stream\//i.test(url)) return "embed";
+                return "http";
+            }
+
+            async loadAndPlay() {
+                const epLabel = document.querySelector(".episode-sidebar-title");
+                if (epLabel && this.allEpisodes.length > 0) {
+                    const current = this.allEpisodes.find(e => e.episode === this.episode);
+                    if (current) epLabel.textContent = current.label || `Episode ${this.episode}`;
+                }
+
+                try {
+                    const data = await API.extract(this.anilistId, this.episode, "sub");
+                    const streams = (data && data.streams) || [];
+
+                    if (streams.length === 0) {
+                        this.showError(this.explainNoStreams(data));
+                        return;
+                    }
+
+                    this.showError(null);
+
+                    /*
+                     * Every backend stream is normalised to the same shape.
+                     * `kind` is decided by Utils (the same helper player.js
+                     * uses) so an HTML player page can never be sent to
+                     * <video>, which is what produced
+                     * "No video with supported format and MIME type found".
+                     */
+                    // The backend signs every stream and ships it as `proxied`
+                    // (the raw upstream `url` is deliberately stripped). Read
+                    // the playable URL through the same resolver the player
+                    // uses, or every source is filtered out and the server
+                    // row disappears.
+                    const sources = streams
+                        .filter(s => s && (s.proxied || s.url || s.videoUrl))
+                        .map(s => {
+                            const kind = this.classify(s);
+                            return {
+                                quality: s.quality || "auto",
+                                videoUrl: s.proxied || s.url || s.videoUrl,
+                                proxied: s.proxied,
+                                type: s.type,
+                                // `server` is the anonymized "Server N" label the
+                                // backend assigns; `host` holds the real provider
+                                // name and must never reach the UI.
+                                server: s.server,
+                                host: s.server || s.host || "Server",
+                                headers: s.headers,
+                                // Carried through so intro/outro skipping and the
+                                // audio track survive the mapping.
+                                intro: s.intro,
+                                outro: s.outro,
+                                audio: s.audio,
+                                subtitles: s.subtitles || s.subtitle,
+                                kind,
+                                embeddable: kind === "embed",
+                            };
+                        });
+
+                    if (sources.length === 0) {
+                        this.showError("The provider returned streams without usable URLs.");
+                        return;
+                    }
+
+                    // Prefer a source we can play directly; fall back to the
+                    // first embeddable player page otherwise.
+                    const preferred = sources.find(s => s.kind === "hls" || s.kind === "dash" || s.kind === "http")
+                        || sources[0];
+
+                    // The backend currently emits `subtitle` (aniwaves) while
+                    // animeonsen emits `subtitles`; accept either spelling or
+                    // the track list is silently always empty.
+                    const subtitles = [];
+                    streams.forEach(s => {
+                        const tracks = s.subtitles || s.subtitle || s.tracks;
+                        if (Array.isArray(tracks)) subtitles.push(...tracks);
+                    });
+
+                    const player = window.getPlayerInstance
+                        ? await window.getPlayerInstance()
+                        : window.playerInstance;
+                    if (!player) {
+                        this.showError("Player failed to initialize. Reload the page.");
+                        return;
+                    }
+
+                    await player.loadStream({
+                        url: preferred.videoUrl,
+                        type: preferred.type,
+                        headers: preferred.headers,
+                        videoSources: sources,
+                        subtitles: subtitles,
+                        provider: data.provider || "Unknown",
+                        intro: { start: preferred.intro?.start || 0, end: preferred.intro?.end || 0 },
+                        outro: { start: preferred.outro?.start || 0, end: preferred.outro?.end || 0 },
+                        audio: preferred.audio || "sub",
+                    });
+
+                    const badge = document.getElementById("player-provider");
+                    if (badge) {
+                        // Only the anonymized label is shown; naming the
+                        // provider would defeat the point of the Source N
+                        // labels.
+                        badge.textContent = preferred.host || "Stream";
+                    }
+                } catch (err) {
+                    console.error(err);
+                    this.showError(`Failed to load streams: ${err.message || err}`);
+                }
+            }
+
+            /** Render or clear the player error panel. */
+            showError(message) {
+                const box = document.getElementById("player-error");
+                const text = document.getElementById("error-message");
+                if (!box || !text) return;
+                if (!message) {
+                    box.style.display = "none";
+                    return;
+                }
+                text.textContent = message;
+                box.style.display = "flex";
+            }
+
+            /** Turn the backend's diagnostics into a readable reason. */
+            explainNoStreams(data) {
+                if (!data) return "No streams found. The backend returned no data.";
+                if (data.reason) return `No streams found. ${data.reason}`;
+                const diag = data.diagnostics || {};
+                const parts = Object.entries(diag)
+                    .map(([name, info]) => `${name}: ${info.error || "no streams"}`);
+                if (parts.length) return `No streams found. ${parts.join(" · ")}`;
+                return "No streams found. Try another episode or provider.";
+            }
+
+            setupControls() {
+                // Episode sidebar toggle
+                const sidebar = document.getElementById("episode-sidebar");
+                const backdrop = document.getElementById("overlay-backdrop");
+                const close = document.getElementById("episode-close");
+
+                const toggle = document.getElementById("episode-toggle");
+                const setSidebar = (open) => {
+                    sidebar.classList.toggle("open", open);
+                    backdrop.classList.toggle("active", open);
+                    if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+                };
+                const toggleSidebar = () => setSidebar(!sidebar.classList.contains("open"));
+
+                close?.addEventListener("click", () => setSidebar(false));
+                backdrop?.addEventListener("click", () => setSidebar(false));
+                toggle?.addEventListener("click", toggleSidebar);
+
+                // Mobile quick episode switcher: navigating to the chosen
+                // episode reuses the same URL the sidebar items build, so the
+                // transition curtain and state handling stay identical.
+                document.getElementById("mobile-episode-select")?.addEventListener("change", (e) => {
+                    const ep = parseInt(e.target.value, 10);
+                    if (!Number.isFinite(ep) || ep === this.episode) return;
+                    Transition.navigate(
+                        `watch.html?id=${this.anilistId}&ep=${ep}`,
+                        `Episode ${ep}`
+                    );
+                });
+
+                // Previous/Next episode
+                document.getElementById("rewind-btn")?.addEventListener("click", () => {
+                    const prev = this.episode - 1;
+                    if (prev >= 1) window.location.href = `watch.html?id=${this.anilistId}&ep=${prev}`;
+                });
+                document.getElementById("forward-btn")?.addEventListener("click", () => {
+                    const next = this.episode + 1;
+                    // Cap on the show's real episode count, not on how many
+                    // sidebar entries are loaded — pagination must not make
+                    // the last loaded episode look like the series finale.
+                    const totalEpisodes = (this.epPagination && typeof this.epPagination.totalEpisodes === "number")
+                        ? this.epPagination.totalEpisodes
+                        : this.allEpisodes.length;
+                    if (totalEpisodes >= next) {
+                        window.location.href = `watch.html?id=${this.anilistId}&ep=${next}`;
+                    }
+                });
+
+                // Play pause
+                const video = document.getElementById("player-video");
+                document.getElementById("play-pause-btn")?.addEventListener("click", () => {
+                    if (video.paused) video.play();
+                    else video.pause();
+                });
+
+                // Volume is owned by player.js (it also clears the autoplay
+                // "tap to unmute" hint). A second toggle handler here would
+                // fight it and could re-mute the video on the same click.
+
+                document.getElementById("player-video")?.addEventListener("volumechange", () => {
+                    const icon = document.getElementById("volume-icon");
+                    if (!icon) return;
+                    if (video.muted || video.volume === 0) icon.textContent = "🔇";
+                    else if (video.volume < 0.5) icon.textContent = "🔉";
+                    else icon.textContent = "🔊";
+                });
+                // Tell the player this page owns the volume icon. The instance
+                // may not exist yet (it is created lazily on first load), so
+                // check now and again once it is available.
+                const markVolumeOwner = (p) => { if (p) p.hasVolumeListener = true; };
+                markVolumeOwner(window.playerInstance);
+                if (!window.playerInstance && window.getPlayerInstance) {
+                    window.getPlayerInstance().then(markVolumeOwner);
+                }
+
+                // Fullscreen
+                document.getElementById("fullscreen-btn")?.addEventListener("click", () => {
+                    const container = document.querySelector(".player-container");
+                    if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                    } else {
+                        container.requestFullscreen();
+                    }
+                });
+                document.addEventListener("fullscreenchange", () => {
+                    const container = document.querySelector(".player-container");
+                    if (document.fullscreenElement) {
+                        container.classList.add("playing");
+                    } else {
+                        container.classList.remove("playing");
+                    }
+                });
+
+                // Skip intro
+                document.getElementById("skip-btn")?.addEventListener("click", async () => {
+                    const player = window.getPlayerInstance
+                        ? await window.getPlayerInstance()
+                        : window.playerInstance;
+                    if (player) player.skipIntro();
+                });
+            }
+        }
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", () => {
+            window.watchPage = new WatchPage();
+          });
+        } else {
+          window.watchPage = new WatchPage();
+        }
+    </script>
+</body>
+</html>

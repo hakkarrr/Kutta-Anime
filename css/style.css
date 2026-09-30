@@ -1,0 +1,3120 @@
+/* The single source of truth for the page gutter.
+   Every horizontally-aligned block (header, rails, detail body, watch layout)
+   inherits this, and the full-bleed hero/banner cancels it back out, so the
+   content can never drift out of line with the header. Widening it from 24px
+   to 40px is what gives the main page its visible empty space at the sides —
+   at 24px the rails read as touching the window edge. */
+:root {
+  --page-gutter: clamp(16px, 3.2vw, 40px);
+
+  /* Height of the floating header.
+     The header is `position: fixed`, so it no longer reserves a row at the top
+     of the page. Pages that open with a full-bleed hero (home, detail) *want*
+     that — the artwork runs under the logo. The pages that open with ordinary
+     content (watch, search results) would otherwise have their first row
+     hidden behind it, so they pad themselves by exactly this much. One token
+     keeps that padding honest if the header is ever resized.
+
+     68px is the DESKTOP height, which is a single row. It is NOT an upper
+     bound for the whole page: below 640px the search box drops to its own
+     full-width row, making the header two rows tall (~100px). The token is
+     redefined inside that media query below — padding a phone page by the
+     desktop value would leave the top ~32px of its content under the header.
+
+     The value must also stay in step with `.header-inner`'s `min-height`, so
+     the two are declared once here and consumed by both the padding and the
+     header itself. */
+  --header-h: 68px;
+}
+
+/* The phone header is two rows (brand, then a full-width search field), so it
+   is genuinely taller than the desktop one. Keeping the token in a media query
+   means the reclaim padding on the watch/search pages tracks the real height
+   automatically instead of every page guessing. */
+@media (max-width: 639px) {
+  :root {
+    --header-h: 104px;
+  }
+}
+
+/* Desktop-only doubling of the side space.
+   The user asked for the same increase again after the first one, so the
+   extra room is applied *on top of* the existing gutter rather than by
+   raising the clamp: the clamp keeps phones and tablets exactly as they are
+   (where a 80px gutter would eat the screen), while a wide window gets a
+   visibly inset, centred column. */
+@media (min-width: 1024px) {
+  :root {
+    --page-gutter: clamp(40px, 6.4vw, 80px);
+  }
+}
+
+.container {
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 0 var(--page-gutter);
+  width: 100%;
+}
+
+/* The viewport-width bleed used by the hero and the detail banner is measured
+   from the containing block's centre, so it is only correct while the element
+   sits in the normal page column. `overflow-x: hidden` here means any rounding
+   or scrollbar error is clipped instead of producing a sideways scroll. */
+body {
+  overflow-x: hidden;
+}
+
+/* Numbers in meta lines must not jitter as they change. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* === Layout === */
+
+.app-wrapper {
+  min-height: 100vh;
+  background: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content {
+  flex: 1;
+  flex-shrink: 0;
+}
+
+/* Reclaiming the space the floating header no longer occupies.
+   ---------------------------------------------------------------------------
+   Because the header is `position: fixed` it takes no room in the flow, so a
+   page that opens with a full-bleed hero (home, anime detail) now correctly
+   runs its artwork from y=0 upward, under the logo. A page that opens with
+   ordinary content would instead hide its first row underneath the controls,
+   so the two container-based openings are pushed clear of `--header-h`.
+
+   Scoped deliberately narrowly: a blanket `padding-top` on `.main-content`
+   would also push the hero down and reintroduce the empty strip this change
+   exists to remove.
+
+   The watch rules are written with the extra `.main-content` ancestor so they
+   beat the `padding-top: 20px` declared later on the plain `.watch-layout`
+   class — that later rule is a same-specificity cascade win, so a bare
+   `.watch-layout` here would be silently overridden and the page would hide
+   its first row behind the header again. */
+.main-content .watch-layout {
+  padding-top: var(--header-h);
+}
+
+/* The catalogue column has to carry the offset whenever there is no hero.
+   ---------------------------------------------------------------------------
+   Attaching the padding to a `.search-head` child was the first attempt, and
+   it was wrong: on the home page `#home-content` is only pushed clear of the
+   header because the *hero* above it fills that space. The `?tab=trending`
+   /`popular`/`recent` routes (`App.renderListPage`) empty the hero container
+   and write a plain `.rail` straight into `#home-content`, so no `.search-head`
+   is ever emitted and the rail's heading and first posters rendered flush at
+   y=0 — underneath the logo and the search box. The degraded home path (the
+   hero fetch failing) had the same hole.
+
+   Keying off the absence of a hero instead makes this structural rather than
+   something every render path has to remember: `:has()` matches when
+   `#hero-container` is empty (or missing), so the container is padded on
+   exactly the routes that need it, and not on the hero routes where padding
+   would push the billboard down and reintroduce the empty strip.
+
+   `:empty` is the right test here — `renderHome`/`renderListPage` both clear
+   the container with `innerHTML = ""`, which leaves it genuinely empty. Where
+   `:has()` is unsupported the rule simply does not match, which degrades to
+   the old behaviour rather than breaking the hero. */
+.main-content:not(:has(#hero-container:not(:empty))) > .container {
+  padding-top: var(--header-h);
+}
+
+/* === Header / Navbar === */
+
+/* The header is an OVERLAY, not a bar.
+   ---------------------------------------------------------------------------
+   It used to be an opaque strip (`background: rgba(5,7,10,.82)` + a blurred
+   backdrop + a bottom border) that sat *above* the page in normal flow, so a
+   solid black band always cut across the top of the artwork. The user asked
+   for the logo and the search box to float on their own instead.
+
+   So there is no background, no border and no blur here at all — the header
+   is transparent and `position: fixed`, which lifts it out of flow so the
+   page's own content (the full-bleed hero on home, the banner on the detail
+   page) starts at the very top and runs *underneath* it. Only the two
+   controls that need to be readable carry their own surface; everything
+   between them is the page showing through.
+
+   `position: fixed` rather than `sticky` on purpose: a sticky element still
+   occupies a row in the flow, which would reserve a ~60px empty strip at the
+   top of every page — exactly the band we are removing. Being out of flow
+   also means the page must reclaim the space itself, which is what the
+   `--header-h` rules below do for the pages without a hero. */
+.site-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: transparent;
+  border-bottom: 0;
+  pointer-events: none; /* the full-width strip must never block page clicks */
+}
+
+/* The inner row is the interactive part; re-enabling pointer events here (and
+   not on the header) is what lets the empty space beside the logo and the
+   search box stay click-through to the hero underneath. */
+.site-header .container {
+  pointer-events: none;
+}
+
+/* The header is now a single row of two children: the brand and the search
+   box. The nav link row that used to sit between them (Home / Trending /
+   Popular / Recent) was removed on request, which is what finally gives the
+   row room to spare on any screen — there is nothing left to crowd the logo.
+   `gap` is generous so the brand and the search box are visibly separate
+   rather than one continuous strip. */
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  min-height: var(--header-h);
+  gap: 16px;
+  padding-block: 8px;
+  pointer-events: none; /* empty space between the controls stays click-through */
+}
+
+.logo-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff; /* over artwork the brand red loses contrast; white always reads */
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  pointer-events: auto; /* the only two clickable things in the header */
+  padding: 4px 6px;
+  border-radius: var(--radius-full);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  transition: all var(--transition-norm);
+  box-shadow: 0 4px 12px var(--color-shadow);
+}
+
+.logo-link:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  color: var(--color-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--color-shadow-strong);
+}
+
+.logo-link:active {
+  transform: translateY(0);
+}
+
+/* The brand mark: the supplied logo/logo.png, rendered as a square badge.
+   The source art is 1254x1254, so it is downscaled here; the explicit width
+   and height reserve the box before the image decodes (no layout shift).
+
+   The drop-shadow is not decoration: with the black bar gone the mark can sit
+   over a bright poster frame, and a bare PNG on a light backdrop loses its
+   edges. The shadow gives it a silhouette at every scroll position. */
+.logo-link .logo-icon {
+  flex-shrink: 0;
+  display: block;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.75));
+}
+
+/* The wordmark is the first thing allowed to give way when the row is tight. */
+.logo-link span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85), 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+/* === Header — narrow screens ===
+   With the nav gone this is a simple two-item row, but the search box still
+   gets its own full-width line below 640px: at that width the input would
+   otherwise collapse to a sliver next to the brand. */
+@media (max-width: 639px) {
+  .header-inner {
+    gap: 10px;
+  }
+
+  .logo-link {
+    font-size: 18px;
+  }
+
+  .logo-link .logo-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+  }
+
+  /* Full-width second row. `order` places it after the brand regardless of
+     document order, so the markup stays the same at every breakpoint. */
+  .search-wrapper {
+    order: 2;
+    flex: 1 0 100%;
+    max-width: none;
+  }
+
+  .search-input {
+    font-size: 16px; /* 16px keeps iOS from zooming on focus */
+  }
+}
+
+@media (max-width: 400px) {
+  /* Too narrow for a wordmark and a logo: the logo image is the brand. */
+  .logo-link span {
+    display: none;
+  }
+}
+
+/* === Search Bar === */
+
+.search-wrapper {
+  position: relative;
+  flex: 1;
+  max-width: 520px;
+  pointer-events: auto;
+}
+
+/* Transparent, but still obviously a field.
+   ---------------------------------------------------------------------------
+   It used to be a solid `--color-bg-input` (#141823) pill, which is what made
+   the header read as a black bar: a dark fill on a dark page underneath an
+   opaque strip. The fill is now a readable *translucent* glass instead — no
+   solid colour, just enough tint plus a backdrop blur so the placeholder stays
+   legible when a poster scrolls behind it. The border carries the affordance,
+   so the field still looks tappable without any block of colour.
+
+   `backdrop-filter` is progressive: where it is unsupported the tint alone
+   still keeps the text readable. */
+.search-input {
+  width: 100%;
+  padding: 9px 16px 9px 40px;
+  border-radius: var(--radius-full);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: #fff;
+  font-size: 14px;
+  transition: all var(--transition-norm);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: 0 4px 12px var(--color-shadow);
+}
+
+.search-input:hover {
+  border-color: var(--glass-border-hover);
+  background: var(--glass-bg-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px var(--color-shadow);
+}
+
+.search-input:focus {
+  background: var(--color-bg-input);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-fade), 0 8px 20px var(--color-shadow-strong);
+  transform: translateY(-1px);
+}
+
+.search-input::placeholder {
+  color: var(--color-text-mid);
+}
+
+/* The browser's own clear/"x" control inherits the light colour, otherwise it
+   stays near-black and disappears against the dark glass. */
+.search-input::-webkit-search-cancel-button {
+  filter: invert(1) brightness(1.6);
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.search-icon {
+  position: absolute;
+  left: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 15px;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
+}
+
+/* === Section === */
+
+.section-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  padding: 0 4px;
+  color: var(--color-text-hi);
+  position: relative;
+}
+
+.section-title::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  width: 40px;
+  height: 2px;
+  background: var(--color-primary);
+  border-radius: 1px;
+  opacity: 0.6;
+}
+
+@media (max-width: 639px) {
+  .section-title {
+    font-size: 17px;
+    margin-bottom: 10px;
+  }
+}
+
+.section-subtitle {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  margin-bottom: 14px;
+  font-weight: 500;
+}
+
+/* === Media Card === */
+
+.media-card {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  transition: var(--transition-norm);
+}
+
+.media-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--color-shadow-strong) 0 12px 28px -12px;
+  border-color: var(--color-border-hover);
+}
+
+.media-card-inner {
+  position: relative;
+  width: 100%;
+  padding-bottom: 150%;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 768px) {
+  .media-card-inner {
+    padding-bottom: 140%;
+  }
+}
+
+@media (max-width: 639px) {
+  .media-card-inner {
+    padding-bottom: 155%;
+  }
+}
+
+.media-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  transition: transform 0.4s ease;
+}
+
+.media-card:hover .media-poster {
+  transform: scale(1.05);
+}
+
+.media-card-body {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 8px;
+  background: linear-gradient(
+    to top,
+    rgba(12, 15, 23, 0.95) 0%,
+    rgba(12, 15, 23, 0.4) 60%,
+    transparent 100%
+  );
+}
+
+.media-score {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffd700;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.media-score.missing {
+  color: var(--color-text-tertiary);
+}
+
+.media-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.media-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.media-meta span {
+  background: var(--color-primary-fade);
+  color: var(--color-primary);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+/* === Grid === */
+
+.grid {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+}
+
+.grid-cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.grid-cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.grid-cols-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.grid-cols-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.grid-cols-6 {
+  grid-template-columns: repeat(6, 1fr);
+}
+
+.grid-cols-7 {
+  grid-template-columns: repeat(7, 1fr);
+}
+
+@media (min-width: 768px) {
+  .md\:grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .md\:grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .md\:grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .md\:grid-cols-5 { grid-template-columns: repeat(5, 1fr); }
+  .md\:grid-cols-6 { grid-template-columns: repeat(6, 1fr); }
+  .md\:grid-cols-7 { grid-template-columns: repeat(7, 1fr); }
+}
+
+@media (max-width: 639px) {
+  .grid {
+    gap: 10px;
+  }
+}
+
+/* === Hero Banner === */
+
+.hero-banner {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  min-height: 380px;
+  display: flex;
+  align-items: flex-end;
+}
+
+@media (max-width: 639px) {
+  .hero-banner {
+    min-height: 260px;
+    border-radius: var(--radius-md);
+  }
+}
+
+.hero-banner img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(5, 7, 10, 0.95) 0%,
+    rgba(5, 7, 10, 0.25) 50%,
+    transparent 80%
+  );
+  z-index: 0;
+}
+
+.hero-content {
+  position: relative;
+  z-index: 1;
+  padding: 24px;
+  max-width: 600px;
+}
+
+@media (max-width: 639px) {
+  .hero-content {
+    padding: 18px;
+    max-width: 100%;
+  }
+}
+
+.hero-title {
+  font-size: 32px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: #fff;
+  text-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+@media (max-width: 639px) {
+  .hero-title {
+    font-size: 22px;
+  }
+}
+
+.hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.hero-rating {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  color: #ffd700;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* === Buttons === */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: var(--radius-full);
+  padding: 8px 18px;
+  transition: all var(--transition-norm);
+  border: 1px solid transparent;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  position: relative;
+  overflow: hidden;
+}
+
+.btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+  transition: left 0.6s ease;
+}
+
+.btn:hover::before {
+  left: 100%;
+}
+
+.btn-primary {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+  box-shadow: 0 4px 12px var(--color-shadow-accent);
+}
+
+.btn-primary:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px var(--color-shadow-accent-hover);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: var(--glass-bg);
+  color: var(--color-text);
+  border-color: var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.btn-secondary:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px var(--color-shadow);
+}
+
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 12px;
+}
+
+.btn-lg {
+  padding: 12px 28px;
+  font-size: 16px;
+}
+
+/* === Badge === */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  transition: all var(--transition-fast);
+  box-shadow: 0 2px 4px var(--color-shadow);
+}
+
+.badge-sub {
+  background: var(--color-sub-fade);
+  color: var(--color-sub);
+}
+
+.badge-sub:hover {
+  background: var(--color-sub);
+  color: #fff;
+}
+
+.badge-dub {
+  background: var(--color-dub-fade);
+  color: var(--color-dub);
+}
+
+.badge-dub:hover {
+  background: var(--color-dub);
+  color: #fff;
+}
+
+.badge-movie {
+  background: var(--color-movie-fade);
+  color: var(--color-movie);
+}
+
+.badge-movie:hover {
+  background: var(--color-movie);
+  color: #fff;
+}
+
+.badge-status {
+  background: var(--color-status-fade);
+  color: var(--color-status);
+}
+
+.badge-status:hover {
+  background: var(--color-status);
+  color: #fff;
+}
+
+.badge-status.hiatus {
+  background: var(--color-status-hiatus-fade);
+  color: var(--color-status-hiatus);
+}
+
+.badge-status.hiatus:hover {
+  background: var(--color-status-hiatus);
+  color: #fff;
+}
+
+.badge-status.cancelled {
+  background: var(--color-status-cancelled-fade);
+  color: var(--color-status-cancelled);
+}
+
+.badge-status.cancelled:hover {
+  background: var(--color-status-cancelled);
+  color: #fff;
+}
+
+/* === Skeleton loader === */
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-bg-card);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  box-shadow: 0 2px 8px var(--color-shadow);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 100%);
+  animation: shimmer 1.4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* === Tabs === */
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.tab {
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border-bottom: 2px solid transparent;
+  transition: var(--transition-fast);
+}
+
+.tab.active,
+.tab:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* === Chips === */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-input);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  transition: var(--transition-fast);
+  white-space: nowrap;
+}
+
+.chip:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.chip.active {
+  background: var(--color-primary-fade);
+  color: var(--color-primary);
+}
+
+/* === Dropdown === */
+
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 50;
+  min-width: 180px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 6px 0;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: var(--transition-norm);
+  box-shadow: var(--color-shadow-strong) 0 12px 28px -12px;
+}
+
+.dropdown:hover .dropdown-menu,
+.dropdown-menu:hover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.dropdown-item {
+  display: block;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  transition: var(--transition-fast);
+}
+
+.dropdown-item:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+/* === Pagination === */
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin: 32px 0;
+}
+
+.page-btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  transition: var(--transition-fast);
+}
+
+.page-btn:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.page-btn.active {
+  background: var(--color-primary);
+  color: var(--color-bg);
+}
+
+/* === Search suggestions dropdown ===
+   Rendered by app.js / anime.html but previously had no styles at all. */
+
+.search-suggestions {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 90;
+  display: none;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 32px -16px var(--color-shadow-strong);
+}
+
+.search-suggestions.active {
+  display: block;
+}
+
+.suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 14px;
+  transition: var(--transition-fast);
+}
+
+.suggestion-item:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.suggestion-thumb {
+  width: 40px;
+  height: 56px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-input);
+}
+
+.suggestion-info {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-empty {
+  padding: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* === Episode grid (anime detail) === */
+
+.episode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.episode-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  cursor: pointer;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: var(--transition-fast);
+}
+
+.episode-item:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-border-hover);
+  transform: translateY(-2px);
+}
+
+.episode-item.active {
+  background: var(--color-primary-fade);
+  border-color: var(--color-primary);
+}
+
+.episode-thumb {
+  width: 56px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+}
+
+.episode-info {
+  min-width: 0;
+}
+
+.episode-num {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.episode-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* === Empty / error states === */
+
+.no-results {
+  grid-column: 1 / -1;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.no-results-icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  margin: 24px auto;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* === Footer === */
+
+.site-footer {
+  margin-top: 40px;
+  padding: 24px 0;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-alt);
+}
+
+.footer-text {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  text-align: center;
+}
+
+/* ==========================================================================
+   Movy-style presentation layer
+   --------------------------------------------------------------------------
+   The reference site is a Next.js + Tailwind app, so nothing below is copied
+   from it: these are plain-CSS equivalents of the *look* the user asked for —
+   full-bleed horizontal rails, a thin red accent bar on every section heading,
+   2:3 posters with a title + "★ score · year · type" caption, and restrained
+   typography. Everything maps onto the existing colour tokens so the rest of
+   the app (watch page, player) keeps its current theme.
+   ========================================================================== */
+
+/* --- Home layout rhythm --- */
+#home-content {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(28px, 4vw, 52px);
+  padding-bottom: 40px;
+}
+
+/* --- Section rail --- */
+.rail {
+  position: relative;
+  min-width: 0;
+}
+
+.row-head {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 0 2px;
+}
+
+/* The 3px accent bar is Movy's signature section marker. */
+.row-accent {
+  flex-shrink: 0;
+  width: 3px;
+  min-height: 1.15em;
+  align-self: stretch;
+  background: var(--color-primary);
+  border-radius: 2px;
+}
+
+.row-copy {
+  min-width: 0;
+}
+
+.row-title {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+}
+
+@media (max-width: 639px) {
+  .row-title {
+    font-size: 18px;
+  }
+}
+
+.row-title-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: inherit;
+}
+
+.row-title-link svg {
+  opacity: 0.7;
+  transition: transform var(--transition-norm), opacity var(--transition-norm);
+}
+
+.row-title-link:hover svg {
+  opacity: 1;
+  transform: translateX(3px);
+}
+
+.row-subtitle {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--color-text-tertiary);
+}
+
+@media (max-width: 639px) {
+  .row-subtitle {
+    font-size: 12.5px;
+  }
+}
+
+/* --- The scroller itself ---
+   `--rail-inset` bleeds the rail out to the viewport edge on small screens so
+   cards can run off the side like a native carousel, while staying aligned to
+   the container from tablet up. */
+.rail-row {
+  position: relative;
+  --rail-inset: 0px;
+}
+
+@media (max-width: 767px) {
+  .rail-row {
+    /* Must track --page-gutter exactly: a different value shifts the first
+       card out of line with the section heading above it. */
+    --rail-inset: var(--page-gutter);
+  }
+}
+
+.rail-track {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding-inline: var(--rail-inset);
+  margin-inline: calc(var(--rail-inset) * -1);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.rail-track::-webkit-scrollbar {
+  display: none;
+}
+
+.rail-track:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.45);
+  outline-offset: -2px;
+  border-radius: 10px;
+}
+
+.rail-track > * {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+/* Invisible "load more" marker at the end of a rail.
+   It must stay 1px and non-snapping: a bigger marker would snap the rail to
+   the end and jump the cards sideways when it is appended.
+
+   Written as `.rail-track > .rail-sentinel` on purpose: the shared
+   `.rail-track > *` rule above sets `scroll-snap-align: start` and is MORE
+   specific than a bare `.rail-sentinel`, so a class-only selector would lose
+   and the marker would still be a snap target. */
+.rail-track > .rail-sentinel {
+  flex: 0 0 auto;
+  width: 1px;
+  align-self: stretch;
+  scroll-snap-align: none;
+  pointer-events: none;
+}
+
+/* Edge fade, shown only when there is more to scroll in that direction. */
+.rail-row::before,
+.rail-row::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 56px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--transition-norm);
+}
+
+.rail-row::before {
+  left: calc(var(--rail-inset) * -1);
+  background: linear-gradient(to right, var(--color-bg) 5%, transparent 100%);
+}
+
+.rail-row::after {
+  right: calc(var(--rail-inset) * -1);
+  background: linear-gradient(to left, var(--color-bg) 5%, transparent 100%);
+}
+
+.rail-row[data-at-start="false"]::before,
+.rail-row[data-at-end="false"]::after {
+  opacity: 1;
+}
+
+/* Arrows are for fine pointers; touch users swipe. */
+.rail-arrow {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .rail-arrow {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+    filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.6));
+    transition: transform var(--transition-fast), opacity var(--transition-norm);
+  }
+
+  .rail-arrow:hover {
+    transform: scale(1.14);
+  }
+
+  .rail-arrow:disabled {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .rail-arrow.prev {
+    left: calc(var(--rail-inset) * -1);
+  }
+
+  .rail-arrow.next {
+    right: calc(var(--rail-inset) * -1);
+  }
+}
+
+/* --- Rail card --- */
+.rail-card {
+  width: var(--card-w-xs);
+}
+
+@media (min-width: 640px) {
+  .rail-card {
+    width: var(--card-w-sm);
+  }
+}
+
+@media (min-width: 768px) {
+  .rail-card {
+    width: var(--card-w-md);
+  }
+}
+
+@media (min-width: 1280px) {
+  .rail-card {
+    width: var(--card-w-lg);
+  }
+}
+
+.rail-card-link {
+  display: block;
+  color: inherit;
+}
+
+.rail-poster-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  transition: border-color var(--transition-norm), box-shadow var(--transition-norm);
+}
+
+.rail-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .rail-card:hover .rail-poster {
+    transform: scale(1.06);
+  }
+
+  .rail-card:hover .rail-poster-wrap {
+    border-color: rgba(238, 241, 246, 0.22);
+    box-shadow: 0 18px 36px -18px rgba(0, 0, 0, 0.85);
+  }
+}
+
+@media (hover: none) {
+  .rail-card:active .rail-poster-wrap {
+    transform: scale(0.97);
+  }
+}
+
+/* Rank badge (Top-10 style) and corner tag */
+.rail-rank {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 36px;
+  padding: 5px 2px 4px;
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 800;
+  border-bottom-right-radius: 6px;
+}
+
+.rail-rank-label {
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rail-rank-num {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-tag {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  z-index: 3;
+  display: inline-flex;
+  justify-content: center;
+  padding: 4px 7px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border-radius: 4px 4px 0 0;
+}
+
+.rail-meta {
+  margin-top: 10px;
+  padding: 0 2px;
+}
+
+.rail-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  transition: color var(--transition-norm);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .rail-card:hover .rail-card-title {
+    color: var(--color-primary);
+  }
+}
+
+@media (max-width: 639px) {
+  .rail-card-title {
+    font-size: 13px;
+  }
+}
+
+.rail-facts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  font-size: 11.5px;
+  line-height: 1;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.rail-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rail-star {
+  color: var(--color-primary);
+  font-size: 10px;
+}
+
+.rail-dot {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+/* --- Hero (Movy's full-bleed billboard) --- */
+.hero-banner {
+  position: relative;
+  width: 100vw;
+  margin-left: calc(50% - 50vw);
+  min-height: clamp(360px, 56vh, 620px);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  background: var(--color-bg-alt);
+  margin-bottom: clamp(20px, 3vw, 40px);
+}
+
+.hero-banner img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 28%;
+  z-index: 0;
+}
+
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    to top,
+    var(--color-bg) 0%,
+    rgba(5, 7, 10, 0.86) 22%,
+    rgba(5, 7, 10, 0.45) 52%,
+    rgba(5, 7, 10, 0.1) 78%,
+    transparent 100%
+  );
+}
+
+.hero-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(
+    90deg,
+    rgba(5, 7, 10, 0.72) 0%,
+    rgba(5, 7, 10, 0.45) 30%,
+    transparent 68%
+  );
+}
+
+.hero-content {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 1920px;
+  margin: 0 auto;
+  /* The banner is full-bleed, so the headline is what has to carry the page
+     gutter itself. Sharing the variable keeps the hero text aligned with the
+     rails underneath instead of 16px off. */
+  padding: 0 var(--page-gutter) clamp(40px, 8vh, 96px);
+}
+
+.hero-title {
+  margin: 0;
+  max-width: 620px;
+  font-size: clamp(28px, 4.4vw, 52px);
+  font-weight: 800;
+  line-height: 0.98;
+  letter-spacing: -0.03em;
+  color: #fff;
+  text-transform: uppercase;
+  text-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.hero-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 0;
+  margin-top: 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+.hero-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.hero-facts .rail-dot {
+  margin: 0 10px;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.hero-banner.placeholder {
+  min-height: clamp(360px, 56vh, 620px);
+}
+
+/* --- Episode list on the detail page ---
+   Movy shows a card grid; a title only appears when the backend resolved one
+   from Crunchyroll metadata, otherwise the row stays compact.
+
+   A fixed `minmax()` track can never divide the container evenly: at 1440px
+   the container is 1392px, so 6 × 220px leaves 11px of slack, which
+   `justify-content` (default `normal`) turns into ~11px of visual left padding.
+   That is what made the cards look inset relative to the banner and the
+   heading. `auto-fit` + `minmax(_, 1fr)` with a fluid floor fills the row
+   exactly, so the first card's edge always lines up with the section gutter. */
+.episode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(clamp(150px, 16vw, 200px), 1fr));
+  gap: 10px;
+  justify-content: start;
+}
+
+@media (min-width: 1024px) {
+  .episode-grid {
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  }
+}
+
+.episode-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  cursor: pointer;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.episode-item:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-border-hover);
+  transform: translateY(-2px);
+}
+
+.episode-item.active {
+  background: var(--color-primary-fade);
+  border-color: var(--color-primary);
+}
+
+.episode-item .episode-num {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.episode-item .episode-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.episode-item .episode-label.empty {
+  color: var(--color-text-muted);
+}
+
+/* --- Skeleton pieces used by the rails --- */
+.skeleton-line {
+  height: 11px;
+  border-radius: 4px;
+  background: var(--color-border);
+  margin-bottom: 7px;
+}
+
+.skeleton-line.sm {
+  height: 9px;
+  margin-bottom: 0;
+}
+
+/* --- Premium page-transition "cut scene" --- */
+.page-transition {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(120% 120% at 50% 40%, #0b0f16 0%, #05070a 62%, #000 100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.34s ease, visibility 0s linear 0.34s;
+}
+
+.page-transition.active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.24s ease, visibility 0s;
+}
+
+.page-transition.leaving {
+  opacity: 0;
+}
+
+/* Subtle film grain so the curtain reads as intentional, not a blank screen. */
+.pt-grain {
+  position: absolute;
+  inset: -20%;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: pt-grain 0.6s steps(2, end) infinite;
+}
+
+@keyframes pt-grain {
+  0% { transform: translate(0, 0); }
+  50% { transform: translate(-2%, 1%); }
+  100% { transform: translate(1%, -2%); }
+}
+
+.pt-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+/* Three stacked bars that "cut in" — a quiet nod to a film splice. */
+.pt-mark {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 46px;
+}
+
+.pt-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-primary);
+  transform-origin: left center;
+  animation: pt-bar 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.pt-bar.b1 { width: 100%; animation-delay: 0s; }
+.pt-bar.b2 { width: 68%; animation-delay: 0.12s; }
+.pt-bar.b3 { width: 38%; animation-delay: 0.24s; }
+
+@keyframes pt-bar {
+  0%, 100% { transform: scaleX(0.35); opacity: 0.45; }
+  45% { transform: scaleX(1); opacity: 1; }
+}
+
+.pt-word {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+}
+
+.pt-word span {
+  color: var(--color-primary);
+}
+
+.pt-sub {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+}
+
+.pt-progress {
+  position: relative;
+  width: 168px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.pt-progress span {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
+  animation: pt-progress 1.15s ease-in-out infinite;
+}
+
+@keyframes pt-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+
+/* Prevent scroll during the curtain and settle the incoming page. */
+html.is-transitioning {
+  overflow: hidden;
+}
+
+/* While the destination is still fetching, the curtain stays up and the page
+   underneath must not be scrolled or focused into view. The overlay is fixed
+   at z-index 9999, so nothing can be clicked through regardless. */
+html.is-page-loading {
+  overflow: hidden;
+}
+
+/* The reveal: hold, then slide the brand block up as the curtain lifts so the
+   handover to the real page reads as one motion rather than a hard cut. */
+.page-transition .pt-content {
+  transition: transform 0.34s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.34s ease;
+}
+
+.page-transition.leaving .pt-content {
+  transform: translateY(-10px);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition .pt-content {
+    transition: none;
+  }
+  .page-transition.leaving .pt-content {
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pt-grain,
+  .pt-bar,
+  .pt-progress span {
+    animation: none;
+  }
+  .page-transition {
+    transition: opacity 0.15s ease, visibility 0s linear 0.15s;
+  }
+}
+
+/* ============================================================
+   Movy-style anime detail page (hero + topbar)
+   ============================================================ */
+
+/* Top bar for anime detail page (back/home buttons)
+   ---------------------------------------------------------------------------
+   The global header is now a floating overlay fixed at the top of the page, and
+   this bar's back/home buttons live at the same y. Left alone they would land
+   directly under the logo and the search box, so the bar is pushed down by the
+   header height and the buttons sit on the row beneath it.
+
+   It also stops being `sticky`: with the header floating over the page, a
+   second sticky strip pinned to the same top edge would slide *underneath* the
+   header and the gradient would smear across the logo. Letting this one scroll
+   away keeps the floating header as the only fixed thing on the page. */
+.detail-topbar{
+  position:relative;
+  z-index:50;
+  padding:calc(var(--header-h) + 6px) 0 14px;
+  background:linear-gradient(180deg,rgba(5,7,10,.94) 0%,rgba(5,7,10,.6) 42%,rgba(5,7,10,.28) 64%,rgba(5,7,10,.08) 84%,rgba(5,7,10,0) 100%);
+}
+.detail-topbar .topbar-inner{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+.detail-topbar .btn-icon{
+  width:40px;
+  height:40px;
+  display:grid;
+  place-items:center;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(8,10,14,.45);
+  color:#fff;
+  cursor:pointer;
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  transition:background .2s var(--transition-norm),border-color .2s var(--transition-norm),transform .15s var(--transition-norm);
+}
+.detail-topbar .btn-icon:hover{background:rgba(255,255,255,.13);border-color:rgba(255,255,255,.24);}
+.detail-topbar .btn-icon:active{transform:scale(.94);}
+.detail-topbar .rule{width:1px;height:20px;background:rgba(255,255,255,.2);display:block;}
+
+/* Hero banner for anime detail — a full-bleed billboard.
+   ---------------------------------------------------------------------------
+   This previously used a fixed `height:320px` plus `margin-bottom:-120px`, so
+   the banner *collapsed to 200px of real layout* and pulled the episode grid
+   up into the first screen. Two bugs came from that: the description looked
+   "cut off" (it was actually clipped by a negative margin landing on top of
+   it) and episodes appeared immediately under the fold.
+   The reference never sets a height — it lets `min-height` + the copy's own
+   flow decide, then sits above a normal page container. That is what we do
+   here: full-bleed across the viewport, `min-height` with a `clamp()` so tall
+   content can still push it open, and no negative margin at all. */
+.detail-banner{
+  position:relative;
+  width:100vw;
+  margin-left:calc(50% - 50vw);
+  min-height:clamp(380px,60vh,660px);
+  display:flex;
+  align-items:flex-end;
+  overflow:hidden;
+  background:var(--color-bg-alt);
+  background-size:cover;
+  background-position:center 28%;
+  border-radius:0;
+  margin-bottom:clamp(20px,3vw,36px);
+}
+@media (max-width:767px){.detail-banner{min-height:clamp(320px,52vh,480px);}}
+.detail-banner img{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  object-position:center 28%;
+  z-index:0;
+}
+.detail-banner::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:1;
+  background:linear-gradient(0deg,var(--color-bg) 0%,rgba(5,7,10,.86) 20%,rgba(5,7,10,.42) 50%,rgba(5,7,10,.1) 76%,transparent 100%),
+             linear-gradient(90deg,rgba(5,7,10,.78) 0%,rgba(5,7,10,.5) 32%,transparent 68%);
+}
+.detail-banner.placeholder-banner{background:var(--color-border);}
+
+/* Vignette overlay for hero */
+.ep-vignette{
+  position:absolute;
+  inset:0;
+  z-index:1;
+  background:radial-gradient(120% 90% at 20% 60%,transparent 40%,rgba(0,0,0,.55) 100%);
+}
+
+/* Hero content — aligned to the same gutter as every other section.
+   The banner is full-bleed, so the copy carries the container inset itself:
+   `max-width:1920px; margin:0 auto;` + the identical side padding token. */
+.detail-hero{
+  position:relative;
+  z-index:2;
+  width:100%;
+  max-width:1920px;
+  margin:0 auto;
+  padding-top:clamp(28px,6vh,64px);
+  padding-bottom:clamp(24px,5vh,56px);
+}
+
+/* Hero title */
+.hero-title{
+  font-size:clamp(28px,5.2vw,56px);
+  font-weight:900;
+  line-height:.95;
+  letter-spacing:-.03em;
+  text-transform:uppercase;
+  color:#fff;
+  text-shadow:0 8px 24px rgba(0,0,0,.55);
+  max-width:18ch;
+  margin:0 0 16px;
+}
+@media (max-width:639px){.hero-title{font-size:26px;}}
+
+/* Votes section */
+.hero-votes{
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  margin-bottom:12px;
+}
+.vote-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  padding:4px 2px;
+  border:0;
+  background:none;
+  color:rgba(255,255,255,.7);
+  font-size:14px;
+  font-variant-numeric:tabular-nums;
+  cursor:pointer;
+  transition:color .2s var(--transition-norm);
+}
+.vote-btn:hover{color:#fff;}
+.vote-btn[aria-pressed="true"]{color:var(--color-accent);}
+
+/* Genres line */
+.hero-genres{
+  display:inline-flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+  margin:0 0 14px;
+  font-size:14px;
+  color:rgba(255,255,255,.75);
+}
+.hero-genres .genre{display:inline-flex;align-items:center;gap:8px;}
+.hero-genres .dot{color:rgba(255,255,255,.4);}
+
+/* Description — the reference lets this run to its natural length, so the
+   detail hero is not clamped. (The home hero keeps its clamp for balance;
+   this rule is scoped to the detail page's .hero-content .hero-desc.) */
+.hero-desc{
+  margin:0 0 clamp(18px,3vh,28px);
+  max-width:72ch;
+  font-size:15px;
+  line-height:1.7;
+  color:rgba(255,255,255,.76);
+  text-shadow:0 1px 3px rgba(0,0,0,.5);
+}
+@media (max-width:767px){.hero-desc{font-size:14px;}}
+
+/* Action buttons */
+.hero-cta{
+  display:inline-flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:12px;
+}
+.btn-primary{
+  background:#fff;
+  color:#05070a;
+  box-shadow:0 10px 30px rgba(0,0,0,.4);
+}
+.btn-primary:hover{background:#e8e8ee;}
+.btn-primary svg{flex:0 0 auto;}
+
+.btn-ghost{
+  background:rgba(255,255,255,.06);
+  border-color:rgba(255,255,255,.14);
+  color:#fff;
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+}
+.btn-ghost:hover{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.28);}
+.btn-ghost svg{flex:0 0 auto;}
+
+/* Detail genres */
+.detail-genres{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:12px;
+}
+.detail-genres .chip{
+  padding:4px 10px;
+  font-size:12px;
+  font-weight:500;
+  background:rgba(255,255,255,.1);
+  color:#05070a;
+  border-radius:999px;
+}
+
+/* Detail description.
+   DELIBERATELY UNUSED, kept for the standalone synopsis block.
+   The synopsis used to be rendered twice — once as `.hero-desc` inside the
+   banner and again as a `.detail-description` section below it — so the
+   second copy was removed and the banner copy is now the only one. These
+   rules are left in place so a synopsis can be re-introduced lower on the
+   page (which is why the gutter note below still applies) without guessing
+   the spacing again. Nothing references the class today, and a rule matching
+   no element is inert.
+   Inside `.detail-body.container` the block already carries the page gutter,
+   so its own padding would indent it twice. */
+.detail-description{
+  margin-top:clamp(22px,3vw,34px);
+}
+.detail-description .section-title{
+  margin:0 0 10px;
+  padding:0;
+}
+.detail-description p{
+  margin:0;
+  max-width:88ch;
+  color:var(--color-text-secondary);
+  font-size:14.5px;
+  line-height:1.75;
+}
+
+/* ==========================================================================
+   Episode cards that reuse the anime's own 16:9 artwork
+   --------------------------------------------------------------------------
+   Both the detail page and the watch-page sidebar render 16:9 cards built
+   from the show's banner/cover, because episode-level stills are not part of
+   the data we get from AniList. One set of rules serves both containers
+   (`.episode-grid` and `.episode-list`), so the two pages cannot drift apart.
+   ========================================================================== */
+
+.ep-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: border-color var(--transition-norm), transform var(--transition-fast),
+    box-shadow var(--transition-norm);
+}
+
+.ep-card-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.72);
+  transition: transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ep-card-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.94) 0%,
+    rgba(0, 0, 0, 0.62) 40%,
+    rgba(0, 0, 0, 0.28) 68%,
+    rgba(0, 0, 0, 0.12) 100%
+  );
+}
+
+.ep-card-body {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+}
+
+.ep-card-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.ep-card-name {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #fff;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ep-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.ep-card-foot svg {
+  flex: 0 0 auto;
+  fill: #fff;
+  color: #fff;
+}
+
+.ep-card-tag {
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+
+/* Visited episodes are remembered by the browser, so a "Watched" badge is
+   free and makes a long list scannable. */
+.ep-card-watched {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border-radius: 6px;
+  background: var(--color-primary);
+  color: #fff;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ep-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--color-border-hover);
+    box-shadow: 0 18px 34px -20px rgba(0, 0, 0, 0.9);
+  }
+
+  .ep-card:hover .ep-card-media {
+    transform: scale(1.05);
+  }
+}
+
+.episode-item.ep-active {
+  border-color: var(--color-primary);
+}
+
+.episode-item.ep-active .ep-card {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.episode-item.ep-dim {
+  opacity: 0.62;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .episode-item.ep-dim:hover {
+    opacity: 1;
+  }
+}
+
+/* --- "show more" pager for long-running shows --- */
+.episodes-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.episodes-count {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.episodes-more .btn {
+  padding: 9px 20px;
+}
+
+@media (max-width: 639px) {
+  .episodes-more {
+    gap: 10px;
+  }
+
+  .episodes-more .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+/* --- Detail page: the episodes section ---
+   `loadEpisodes()` appends this node to `#anime-detail`, NOT inside
+   `.detail-body`, so it must carry its own top margin to clear the banner.
+   (`.detail-body.container` is now an empty holder: the page renders its
+   synopsis in the banner, so there is nothing left for that wrapper to
+   space.) */
+.detail-episodes {
+  position: relative;
+  z-index: 2;
+  margin-top: clamp(26px, 4vw, 46px);
+  padding-bottom: 40px;
+}
+
+/* Section heading: accent bar + title + live count, same shape as a home rail. */
+.detail-episodes .episodes-head {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 0 2px;
+}
+
+.detail-episodes .episodes-head .row-title {
+  font-size: clamp(19px, 2.4vw, 24px);
+}
+
+.detail-episodes .episodes-head .row-subtitle {
+  margin-top: 2px;
+}
+
+/* The loading placeholder must occupy the final grid box, not a stray cell. */
+.episode-grid > .ep-loading {
+  grid-column: 1 / -1;
+}
+
+/* --- Watch page: the player column and its sidebar --- */
+.watch-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 24px;
+  align-items: start;
+  padding-top: 20px;
+}
+
+@media (max-width: 1023px) {
+  .watch-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  /* On small screens the episode list is an overlay, opened by the header
+     button, exactly as before — it simply no longer owns the page flow. */
+  .watch-layout .episode-sidebar {
+    position: fixed;
+  }
+}
+
+@media (min-width: 1024px) {
+  .watch-layout .episode-sidebar {
+    position: sticky;
+    /* Clears the floating header, which is `position: fixed` and overlays the
+       page. The old 84px was hand-tuned against the previous opaque 60px bar;
+       deriving it from `--header-h` keeps the sidebar's first row from tucking
+       underneath the logo and search box if the header is ever resized. */
+    top: calc(var(--header-h) + 16px);
+    right: auto;
+    z-index: 1;
+    width: 100%;
+    max-width: none;
+    height: min(70vh, 620px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-alt);
+    transition: none;
+  }
+
+  /* Desktop always shows the list, so the close button is meaningless. */
+  .watch-layout .episode-sidebar .episode-close {
+    display: none;
+  }
+}
+
+.episode-sidebar-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-bg-alt);
+}
+
+.provider-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* The sidebar is always visible from 1024px up, so the toggle is mobile-only. */
+.episode-toggle {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .episode-toggle {
+    display: inline-flex;
+  }
+}
+
+.watch-info {
+  margin-top: 24px;
+}
+
+.watch-title {
+  font-size: clamp(20px, 3vw, 28px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.watch-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.watch-description {
+  margin-top: 14px;
+  max-width: 90ch;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+}
+
+.watch-genres {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* --- Footer (honest copy, reference-style two-column layout) --- */
+.site-footer {
+  margin-top: clamp(40px, 6vw, 72px);
+}
+
+.footer-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px 0;
+}
+
+@media (min-width: 768px) {
+  .footer-inner {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 48px;
+  }
+}
+
+.footer-note {
+  max-width: 62ch;
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: var(--color-text-tertiary);
+}
+
+.footer-aside {
+  flex-shrink: 0;
+}
+
+@media (min-width: 768px) {
+  .footer-aside {
+    text-align: right;
+  }
+}
+
+.footer-brand {
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+}
+
+.footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+
+@media (min-width: 768px) {
+  .footer-nav {
+    justify-content: flex-end;
+  }
+}
+
+.footer-nav a {
+  color: var(--color-text-tertiary);
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.15);
+  text-underline-offset: 3px;
+  transition: color var(--transition-fast);
+}
+
+.footer-nav a:hover {
+  color: var(--color-text-secondary);
+}
+
+/* Color accent variable */
+:root{--color-accent:#7c5cff;}
+
+/* ==========================================================================
+   Search results page + season switcher
+   ========================================================================== */
+
+/* --- Search results --- */
+
+.search-head {
+  padding: 4px 2px 0;
+}
+
+.search-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  /* A long query must wrap instead of pushing the layout wide. */
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 639px) {
+  .search-title {
+    font-size: 19px;
+  }
+}
+
+.search-status {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+}
+
+/* A plain responsive grid: results are a set to scan, not a rail to swipe. */
+.search-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: clamp(12px, 2vw, 20px);
+  margin-top: 16px;
+}
+
+@media (max-width: 479px) {
+  .search-grid {
+    grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+    gap: 12px;
+  }
+}
+
+/* `mediaCard` is built for fixed-width rails, so the cell controls the size
+   here (the card itself is width:auto inside a grid track). */
+.search-cell {
+  min-width: 0;
+}
+
+.search-cell > .rail-card {
+  width: 100%;
+}
+
+.search-cell-featured {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+
+@media (max-width: 639px) {
+  /* Two-up spanning on a phone leaves no room for the rest of the grid. */
+  .search-cell-featured {
+    grid-column: span 1;
+    grid-row: span 1;
+  }
+}
+
+.search-more {
+  display: flex;
+  justify-content: center;
+  padding: 28px 0 8px;
+}
+
+/* --- Suggestion metadata line --- */
+
+.suggestion-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-meta {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Season switcher (anime detail) --- */
+
+.season-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 4px;
+}
+
+.season-strip-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-tertiary);
+}
+
+.season-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.season-list::-webkit-scrollbar {
+  display: none;
+}
+
+.season-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 7px 13px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.season-chip:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-border-hover);
+  color: var(--color-text);
+}
+
+/* The season being viewed is a state, not an action. */
+.season-chip.is-current {
+  background: var(--color-primary-fade);
+  border-color: var(--color-primary);
+  color: var(--color-text);
+  cursor: default;
+}
+
+.season-chip-count {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+}
+
+.season-chip.is-current .season-chip-count {
+  color: var(--color-text-secondary);
+}
+
+/* --- Watch sidebar: season context --- */
+
+.sidebar-season {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+}
+
+.sidebar-season-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.sidebar-season-count {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.sidebar-season-link {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-primary);
+  white-space: nowrap;
+}
+
+.sidebar-season-link:hover {
+  text-decoration: underline;
+}
+
+/* --- Watch sidebar: jump-to-episode bar --- */
+.ep-jump-sidebar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  margin-bottom: 8px;
+}
+
+.ep-jump-sidebar .ep-jump-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-input);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: 13px;
+  font-family: inherit;
+  -moz-appearance: textfield;
+}
+
+.ep-jump-sidebar .ep-jump-input::-webkit-outer-spin-button,
+.ep-jump-sidebar .ep-jump-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.ep-jump-sidebar .ep-jump-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* === Horizontal Scrollable Episodes (Movy-style) === */
+
+.detail-episodes {
+  position: relative;
+}
+
+.episodes-horizontal {
+  position: relative;
+  margin: 0 calc(var(--page-gutter) * -1);
+  padding: 20px 0;
+  background: linear-gradient(
+    to right,
+    var(--color-bg) 0%,
+    transparent 5%,
+    transparent 95%,
+    var(--color-bg) 100%
+  );
+}
+
+.episodes-scroll-track {
+  position: relative;
+  height: 260px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 20px var(--page-gutter);
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.episodes-scroll-track::-webkit-scrollbar {
+  display: none;
+}
+
+.episodes-scroll-content {
+  display: flex;
+  gap: 16px;
+  height: 100%;
+  align-items: center;
+}
+
+.episode-item {
+  flex: 0 0 auto;
+  width: 160px;
+  scroll-snap-align: start;
+}
+
+@media (min-width: 768px) {
+  .episodes-scroll-track {
+    height: 320px;
+  }
+  
+  .episodes-scroll-content {
+    gap: 20px;
+  }
+  
+  .episode-item {
+    width: 180px;
+  }
+}
+
+/* Episode sidebar horizontal scrollable */
+.episode-sidebar .episode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.episode-sidebar .episode-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* Navigation buttons for scrollable episodes */
+.episodes-more {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 0 var(--page-gutter);
+}
+
+/* Smooth scrolling behavior */
+.episodes-scroll-track,
+.episode-sidebar .episode-list {
+  scroll-behavior: smooth;
+}
+
+/* Episode scroll indicators */
+.episodes-scroll-track::before,
+.episodes-scroll-track::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 40px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.episodes-scroll-track::before {
+  left: 0;
+  background: linear-gradient(to right, var(--color-bg) 0%, transparent 100%);
+}
+
+.episodes-scroll-track::after {
+  right: 0;
+  background: linear-gradient(to left, var(--color-bg) 0%, transparent 100%);
+}
+
+.episodes-scroll-track[data-at-start="false"]::before,
+.episodes-scroll-track[data-at-end="false"]::after {
+  opacity: 1;
+}
+
+/* === Mobile Episode Selector (Watch Page) === */
+
+@media (max-width: 768px) {
+    .watch-layout {
+        flex-direction: column;
+    }
+
+    .episode-sidebar {
+        position: fixed;
+        top: 0;
+        right: -100%;
+        z-index: 1000;
+        width: 85%;
+        height: 100vh;
+        background: var(--color-bg-alt);
+        border-left: 1px solid var(--color-border);
+        overflow-y: auto;
+        transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: -4px 0 20px var(--color-shadow);
+    }
+
+    .episode-sidebar.open {
+        right: 0;
+    }
+
+    .episode-sidebar-header {
+        padding: 16px;
+        border-bottom: 1px solid var(--color-border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--color-bg);
+    }
+
+    .episode-sidebar-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 0;
+    }
+
+    .episode-close {
+        width: 36px;
+        height: 36px;
+        border-radius: var(--radius-full);
+        background: var(--color-bg-input);
+        color: var(--color-text-secondary);
+        font-size: 16px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all var(--transition-fast);
+    }
+
+    .episode-close:hover {
+        background: var(--color-bg-card-hover);
+        color: var(--color-text);
+    }
+
+    /* Episode selector toggle button — a labelled pill, not a clipped
+       circle. The old 56px round button had `overflow: hidden` (inherited
+       from .btn), so the "Episodes" label was cut off and the control read
+       as missing. A pill keeps the label visible and tappable. */
+    .episode-toggle {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 999;
+        height: 44px;
+        padding: 0 18px;
+        border-radius: var(--radius-full);
+        background: var(--color-primary);
+        color: #fff;
+        box-shadow: 0 4px 12px var(--color-shadow-accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        cursor: pointer;
+        transition: all var(--transition-norm);
+        font-size: 14px;
+        font-weight: 600;
+        overflow: visible;
+        white-space: nowrap;
+    }
+
+    .episode-toggle:hover {
+        background: var(--color-primary-hover);
+        transform: scale(1.05);
+        box-shadow: 0 6px 20px var(--color-shadow-accent-hover);
+    }
+
+    /* Sources panel mobile collapsible
+       -------------------------------------------------------------------------
+       The source chips row (#source-picker, rendered by player.js) used to sit
+       full-width under the player and wrap into many rows, eating half the
+       screen. On mobile it renders as a single collapsed glass bar showing the
+       active server; tapping it expands the chip list vertically in place.
+
+       The vertical layout is keyed on the `.collapsible` class that player.js
+       adds, NOT on the media query alone: a stale cached player.js (or the
+       desktop render path) emits the flat chip row, and without this guard the
+       old rules turned that row into a full-height "ladder of servers". */
+    .source-picker.collapsible {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        margin-top: 10px;
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-md);
+        padding: 0;
+        overflow: hidden;
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        box-shadow: 0 4px 12px var(--color-shadow);
+    }
+
+    /* The always-visible collapsed header row: label + active server + chevron. */
+    .source-picker-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 10px 12px;
+        background: transparent;
+        border: 0;
+        color: var(--color-text);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        text-align: left;
+        transition: background var(--transition-fast);
+    }
+
+    .source-picker-header:hover {
+        background: var(--glass-bg-hover);
+    }
+
+    .source-picker-header .source-picker-label {
+        margin-right: 0;
+        color: var(--color-text-secondary);
+    }
+
+    .source-picker-active {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--color-primary);
+        font-weight: 600;
+    }
+
+    .source-picker-chevron {
+        flex-shrink: 0;
+        font-size: 11px;
+        color: var(--color-text-secondary);
+        transition: transform var(--transition-fast);
+    }
+
+    .source-picker.open .source-picker-chevron {
+        transform: rotate(180deg);
+    }
+
+    /* The expandable chip list, hidden until the header is tapped. */
+    .source-picker-body {
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        padding: 0 12px;
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.25s ease, padding 0.25s ease;
+    }
+
+    .source-picker.open .source-picker-body {
+        display: flex;
+        max-height: 50vh;
+        overflow-y: auto;
+        padding: 2px 12px 12px;
+    }
+
+    /* Liquid-glass chips: translucent fill, soft border, active state glows
+       with the brand colour instead of a solid block. */
+    .source-picker-body .source-chip {
+        width: 100%;
+        justify-content: center;
+        text-align: center;
+        padding: 9px 14px;
+        border-radius: var(--radius-md);
+        background: var(--glass-bg);
+        border: 1px solid var(--glass-border);
+        color: var(--color-text);
+        font-size: 13px;
+        font-weight: 600;
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        transition: background var(--transition-fast), border-color var(--transition-fast),
+            color var(--transition-fast);
+    }
+
+    .source-picker-body .source-chip:hover {
+        background: var(--glass-bg-hover);
+        border-color: var(--glass-border-hover);
+    }
+
+    .source-picker-body .source-chip.active {
+        background: var(--color-primary-fade);
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+    }
+
+    /* Mobile quick episode switcher: sits in the provider-info row under the
+       player so an episode can be changed without opening the overlay. */
+    .mobile-episode-select {
+        flex: 1;
+        min-width: 0;
+        max-width: 260px;
+        padding: 7px 12px;
+        border-radius: var(--radius-md);
+        background: var(--color-bg-card);
+        border: 1px solid var(--color-border);
+        color: var(--color-text);
+        font-size: 13px;
+        font-weight: 600;
+        outline: none;
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+        background-image: linear-gradient(45deg, transparent 50%, var(--color-text-secondary) 50%),
+            linear-gradient(135deg, var(--color-text-secondary) 50%, transparent 50%);
+        background-position: calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+        background-size: 5px 5px, 5px 5px;
+        background-repeat: no-repeat;
+        padding-right: 30px;
+        transition: all var(--transition-fast);
+    }
+
+    .mobile-episode-select:focus {
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px var(--color-primary-fade);
+    }
+
+    /* Main content area padding adjustment for mobile */
+    .video-wrapper {
+        margin-bottom: 80px;
+    }
+
+    /* Adjust player controls for mobile */
+    .player-controls-bottom {
+        padding-bottom: 16px;
+    }
+}
+
+/* Tablet responsive adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .episode-sidebar {
+        width: 320px;
+    }
+}
+
+/* Hide episode toggle on desktop */
+@media (min-width: 769px) {
+    .episode-toggle {
+        display: none;
+    }
+}
