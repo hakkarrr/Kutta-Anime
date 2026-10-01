@@ -15,7 +15,28 @@
 const ANILIST_URL = "https://graphql.anilist.co";
 const ANIZIP_URL = "https://api.ani.zip/mappings";
 const ARM_URL = "https://arm.haglund.dev/api/v2/ids";
-const VIDNEST_BASE = "https://vidnest.fun";
+// The Vidnest *player* resolves its stream client-side by calling the
+// dedicated API host below. These three paths are read verbatim out of the
+// live player bundle (new.vidnest.fun, chunk 66a650124c0d5ab3.js):
+//
+//   megaplay -> `${API}/animehub/{id}/{ep}/{lang}`          (502 right now)
+//   aniwave  -> `${API}/aniwave_hls/{id}/{ep}/{lang}`       (healthy)
+//   anitaku  -> `${API}/hianime/anime/{id}/{ep}/{lang}/hd-2`(healthy)
+//
+// Meanwhile the public page paths this file used to build —
+// vidnest.fun/animepahe/{id}/{ep}/{lang} and vidnest.fun/anime/... — are the
+// player's OLD routes. They still return HTTP 200 (the Next.js shell), so
+// the iframe loads and looks fine, but the app never resolves a stream from
+// them, which is precisely the "everything loads, player stays blank" bug.
+const VIDNEST_API = "https://new.vidnest.fun";
+
+// Emitted in this order: the two verified-working providers first, the
+// currently-502 megaplay route last. Server N labels stay anonymized.
+const _VIDNEST_SERVERS = [
+  { path: id => `${VIDNEST_API}/aniwave_hls/${id}/`, suffix: "" },
+  { path: id => `${VIDNEST_API}/hianime/anime/${id}/`, suffix: "/hd-2" },
+  { path: id => `${VIDNEST_API}/animehub/${id}/`, suffix: "" },
+];
 
 // Two-tier cache (session + persistent).
 //
@@ -652,42 +673,31 @@ async function _anizipMapping(anilistId) {
 
 // --- Vidnest URL builder (port of providers/vidnest.py) -------------------
 
-const _PAHE_SERVERS = ["", "primesrc", "sigma"];
-const _ZORO_SERVERS = ["", "alfa", "beta", "gama", "delta"];
-
 function vidnestStreams(anilistId, ep, audio = "sub") {
   if (!anilistId || !ep) return [];
   const lang = String(audio || "sub").toLowerCase() === "dub" ? "dub" : "sub";
   const streams = [];
   const seen = new Set();
 
-  const build = (prefix, server) => {
-    let url = `${VIDNEST_BASE}/${prefix}/${anilistId}/${ep}/${lang}`;
-    if (server) url += `?server=${encodeURIComponent(server)}`;
-    return url;
-  };
-
-  // Labels are anonymized: the UI must only ever show "Server N", never the
-  // upstream name (same contract as the backend's stream normalization).
-  const backends = [
-    ["animepahe", _PAHE_SERVERS],
-    ["anime", _ZORO_SERVERS],
-  ];
+  // Each entry is a real, provider-backed Vidnest stream. The fragment
+  // carries the episode/audio so the player can key its "did this server
+  // actually start?" watchdog without parsing the URL back apart.
   let n = 0;
-  for (const [prefix, servers] of backends) {
-    for (const server of servers) {
-      const url = build(prefix, server);
-      if (seen.has(url)) continue;
-      seen.add(url);
-      n += 1;
-      streams.push({
-        url,
-        type: "embed",
-        server: `Server ${n}`,
-        host: `Server ${n}`,
-        quality: "auto",
-      });
-    }
+  for (const server of _VIDNEST_SERVERS) {
+    const url = `${server.path(anilistId)}${ep}/${lang}${server.suffix}`;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    n += 1;
+    streams.push({
+      url,
+      type: "embed",
+      server: `Server ${n}`,
+      host: `Server ${n}`,
+      quality: "auto",
+      mediaId: anilistId,
+      episode: ep,
+      audio: lang,
+    });
   }
   return streams;
 }

@@ -103,9 +103,13 @@ class Player {
       AdGuard.install();
     }
     frame.style.display = "block";
-    // Only navigate when the URL actually changes, otherwise re-selecting
-    // the active source would reload the player and lose position.
+    // A deliberate switch to a new URL means the previous server's warning
+    // no longer applies — clear it so a working server isn't tarred with the
+    // dead one's notice.
     if (frame.getAttribute("src") !== url) {
+      const box = document.querySelector("#player-error");
+      if (box) box.style.display = "none";
+      clearTimeout(this.errorTimer);
       frame.src = url;
     }
 
@@ -116,7 +120,83 @@ class Player {
     const controls = wrapper.querySelector(".player-overlay");
     if (controls) controls.style.display = "none";
 
+    this._armEmbedWatchdog(url);
     this.renderSourcePicker();
+  }
+
+  /**
+   * Cross-origin embeds give us no error event when the provider behind
+   * them is down — the shell answers 200 and the iframe sits blank forever.
+   * That was the entire "clicked an episode, player stayed empty until I
+   * went home and came back" experience.
+   *
+   * We cannot see inside the frame, so we do the two things we CAN observe:
+   *   1. `error` on the iframe (fires for DNS/refused/aborted loads).
+   *   2. A stall timer — if the frame reports `load` (or never reports
+   *      anything) the odds are the provider returned an error page or a
+   *      spinner that never resolves. After that, surface an honest note
+   *      telling the user this server is likely down and to try the next
+   *      one, instead of leaving them staring at black.
+   *
+   * It is deliberately non-destructive: it never tears the frame down and
+   * never blocks the player, so a slow-but-working stream is only ever
+   * inconvenienced by a dismissible hint that a successful later state
+   * clears.
+   */
+  _armEmbedWatchdog(url) {
+    const wrapper = document.querySelector(".video-wrapper");
+    if (!wrapper) return;
+    const frame = wrapper.querySelector("#embed-frame");
+    if (!frame) return;
+
+    // A new URL = a new attempt; cancel the previous attempt's listeners.
+    clearTimeout(this.embedStallTimer);
+    if (this._embedCleanup) {
+      this._embedCleanup();
+      this._embedCleanup = null;
+    }
+
+    // Only the newest URL should be able to raise a hint.
+    const token = (this.embedAttempt = (this.embedAttempt || 0) + 1);
+    const isCurrent = () => token === this.embedAttempt;
+
+    const onError = () => {
+      if (isCurrent()) this._warnServerLooksDown();
+    };
+    const onLoad = () => {
+      if (!isCurrent()) return;
+      // `load` means the shell responded — not that a stream resolved.
+      // Give the player a generous window to fetch + decrypt its sources
+      // and start playing, then warn if nothing has come of it.
+      this.embedStallTimer = setTimeout(() => {
+        if (isCurrent()) this._warnServerLooksDown();
+      }, 15000);
+    };
+    frame.addEventListener("error", onError);
+    frame.addEventListener("load", onLoad);
+    this._embedCleanup = () => {
+      frame.removeEventListener("error", onError);
+      frame.removeEventListener("load", onLoad);
+    };
+
+    // Belt and braces: if `load` never fires at all (a connection that
+    // hangs rather than fails), the same warning still has to appear.
+    this.embedStallTimer = setTimeout(() => {
+      if (isCurrent()) this._warnServerLooksDown();
+    }, 20000);
+  }
+
+  /** Honest, non-fatal hint that the current embed server looks down. */
+  _warnServerLooksDown() {
+    const active = this.currentStream && (this.currentStream.server || this.currentStream.host);
+    const more = this.currentSources.length > 1;
+    const tail = more
+      ? " Try another server from the Sources row above."
+      : " Try another episode or reopen the page in a moment.";
+    const msg = `${active || "This server"} isn't responding.${tail}`;
+    // Reuse the player error panel (auto-hides) so this never becomes a
+    // permanent overlay on a stream that is merely slow.
+    this.handleError(msg);
   }
 
   hideEmbed() {
@@ -249,6 +329,12 @@ class Player {
   cleanup() {
     this.hideEmbed();
     clearTimeout(this.errorTimer);
+    clearTimeout(this.embedStallTimer);
+    this.embedAttempt = (this.embedAttempt || 0) + 1; // invalidate pending hints
+    if (this._embedCleanup) {
+      this._embedCleanup();
+      this._embedCleanup = null;
+    }
   }
 
   /**
